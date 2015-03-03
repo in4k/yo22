@@ -224,15 +224,15 @@ static void yo22_paint(float t) {
 
   if (program_counter >= TOTAL_ITERATIONS)
     program_counter = TOTAL_ITERATIONS;
-  else
-    fprintf(stderr, "%d ", program_counter);
+  //else
+  //  fprintf(stderr, "%d%c", program_counter, program_counter%16==15 ? '\n' : ' ');
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glViewport(0, 0, width, height);
   use_program(ProgPostprocess);
   uniform1f("t", t);
   uniform1f("P", (float)program_counter / TOTAL_ITERATIONS);
-  uniform2f("R", width, height);
+  uniform2f("S", width, height);
   bind_texture(TexFrame, 1);
   uniform1i("F", 1);
   bind_texture(TexTerrain0, 2);
@@ -339,7 +339,7 @@ static void monitor_changes() {
       GLuint newprog;
       files[i].updated = 0;
       if (!src) continue;
-      fprintf(stderr, "new %d program ... ", i);
+      fprintf(stderr, "load program %d ... ", i);
       newprog = create_and_compile_program(src);
       if (newprog == 0) continue;
       if (fragment_shaders[i] != NULL)
