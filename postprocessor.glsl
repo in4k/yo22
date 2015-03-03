@@ -8,7 +8,7 @@ float h(vec2 p){
   return texture2D(_T,p/4096.,-20.).w;
 }
 vec3 n(vec2 p){
-  vec2 e=vec2(.01,0.);
+  vec2 e=vec2(1.,0.);
   vec3 dx=vec3(2.*e.x,h(p+e.xy)-h(p-e.xy),0.);
   vec3 dz=vec3(0.,    h(p+e.yx)-h(p-e.yx),2.*e.x);
   return normalize(cross(dz,dx));
@@ -39,10 +39,10 @@ void main(){
   if (p.y-h(p.xz)>.01*l){gl_FragColor=vec4(1.,0.,0.,1.);return;}
   if (h(p.xz)>p.y){gl_FragColor=vec4(1.,0.,1.,1.);return;}
   //gl_FragColor=l/2000.;//vec4((O+D*l).y/1000.);
-  vec3 n = n(O+D*l);
-  vec3 color=vec3(-n.z, n.z, 0.);
-  //vec3 color=max(0.,dot(n(O+D*l), normalize(vec3(1.))))+vec3(.2);
-  //vec3 color=max(0.,dot(n(O+D*l), normalize(vec3(cos(t*10.),1.,sin(t*20.)))))+vec3(.2);
+  vec3 n = n((O+D*l).xz);
+  //vec3 color=vec3(-n.y, n.y, 0.);
+  //vec3 color=max(0.,dot(n, normalize(vec3(1.))))+vec3(.2);
+  vec3 color=max(0.,dot(n, normalize(vec3(cos(t*10.),1.,sin(t*20.)))))+vec3(.2);
   //vec3 color = (O+D*l) / vec3(3000.,1000.,3000.);
   gl_FragColor = mix(vec4(color,1.), vec4(step(V.x*.5+.5,_p)), step(V.y,-.96));
 }
