@@ -75,12 +75,19 @@ enum {
 
 static const char *fragment_shaders[Prog_COUNT] = {NULL, NULL, NULL, NULL};
 
-static const char vertex_shader_source[] = "attribute vec4 v;varying vec2 V;void main(){gl_Position=v;V=v.xy;}";
+static const char *vertex_shader_source[] = {"attribute vec4 v;varying vec2 V;void main(){gl_Position=v;V=v.xy;}"};
+/*static char *common_shader_header = 0;*/
 
 static GLuint textures[Tex_COUNT];
 static GLuint framebuffer;
 static GLuint vertex_shader;
 static GLuint programs[Prog_COUNT];
+static struct {
+  GLint time, progress, target_res, noise, terrain, frame;
+} program_locs[Prog_COUNT];
+static const char *uniform_names[] = {
+  "_t", "_p", "_r", "_N", "_T", "_F", 0
+};
 
 static void bind_texture(int index, int sampler) {
   glActiveTexture(GL_TEXTURE0 + sampler);
@@ -96,34 +103,30 @@ static void bind_framebuffer(int target_index) {
 
 static GLuint program;
 
-static void uniform1i(const char *name, int value) {
-  GLint loc = glGetUniformLocation(program, name);
-  if (loc != -1) glUniform1i(loc, value);
-}
-static void uniform1f(const char *name, float value) {
-  GLint loc = glGetUniformLocation(program, name);
-  if (loc != -1) glUniform1f(loc, value);
-}
-static void uniform2f(const char *name, float v1, float v2) {
-  GLint loc = glGetUniformLocation(program, name);
-  if (loc != -1) glUniform2f(loc, v1, v2);
-}
+static float u_time, u_progress;
+static int width, height;
+static const int noise_sampler = 0, terrain_sampler = 1, frame_sampler = 2;
 
 static void use_program(int index) {
   program = programs[index];
   glUseProgram(program);
-  uniform1i("R", 0);
+  glUniform1f(program_locs[index].time, u_time);
+  glUniform1f(program_locs[index].progress, u_progress);
+  glUniform2f(program_locs[index].target_res, (float)width, (float)height);
+  glUniform1i(program_locs[index].noise, noise_sampler);
+  glUniform1i(program_locs[index].terrain, terrain_sampler);
+  glUniform1i(program_locs[index].frame, frame_sampler);
 }
 
 static void compute() {
-  glRectf(-1, -1, 1, 1);
+  glRects(-1, -1, 1, 1);
 }
 
-static GLuint create_and_compile_shader(int type, const char *source) {
+static GLuint create_and_compile_shader(int type, int n, const char **source) {
   GLint status;
   GLuint shader = glCreateShader(type);
   CHECK(shader != 0, "glCreateShader");
-  glShaderSource(shader, 1, &source, NULL);
+  glShaderSource(shader, n, source, NULL);
   glCompileShader(shader);
 
   glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
@@ -137,10 +140,13 @@ static GLuint create_and_compile_shader(int type, const char *source) {
   return shader;
 }
 
-static GLuint create_and_compile_program(const char *fragment_source) {
+static GLuint create_and_compile_program(int index) {
   GLint status;
-  if (fragment_source == 0) return 0;
-  GLuint fragment = create_and_compile_shader(GL_FRAGMENT_SHADER, fragment_source);
+  int i;
+  if (fragment_shaders[index] == 0) return 0;
+  /*const char *sources[] = {common_shader_header, fragment_source};
+  GLuint fragment = create_and_compile_shader(GL_FRAGMENT_SHADER, 2, sources);*/
+  GLuint fragment = create_and_compile_shader(GL_FRAGMENT_SHADER, 1, fragment_shaders + index);
   GLuint program = glCreateProgram();
   glAttachShader(program, fragment);
   glAttachShader(program, vertex_shader);
@@ -158,12 +164,21 @@ static GLuint create_and_compile_program(const char *fragment_source) {
     return 0;
   }
   fprintf(stderr, "Linked\n");
+
+  for (i = 0; uniform_names[i] != 0; ++i) {
+    ((GLint*)(program_locs + index))[i] = glGetUniformLocation(program, uniform_names[i]);
+    fprintf(stderr, "  %s loc = %d  ", uniform_names[i], ((GLint*)(program_locs + index))[i]);
+  }
+  fprintf(stderr, "\n");
+
+  glDeleteProgram(programs[index]);
+  programs[index] = program;
   return program;
 }
 
 static void yo22_init() {
   int i;
-  vertex_shader = create_and_compile_shader(GL_VERTEX_SHADER, vertex_shader_source);
+  vertex_shader = create_and_compile_shader(GL_VERTEX_SHADER, 1, vertex_shader_source);
   CHECK(vertex_shader != 0, "vertex shader");
   for (i = 0; i < NOISE_SIZE * NOISE_SIZE; ++i)
     noise_buffer[i] = random_lcg();
@@ -172,17 +187,17 @@ static void yo22_init() {
   glGenFramebuffers(1, &framebuffer);
   for (i = 0; i < Tex_COUNT; ++i) {
     glBindTexture(GL_TEXTURE_2D, textures[i]);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex_widths[i], tex_heights[i], 0, GL_RGBA, GL_UNSIGNED_BYTE, tex_data[i]);
+    glTexImage2D(GL_TEXTURE_2D, 0, (i==TexNoise8U)?GL_RGBA:GL_RGBA32F,
+        tex_widths[i], tex_heights[i], 0, GL_RGBA, GL_UNSIGNED_BYTE, tex_data[i]);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
   }
   for (i = 0; i < Prog_COUNT; ++i)
-    programs[i] = create_and_compile_program(fragment_shaders[i]);
+    create_and_compile_program(i);
 }
 
-static int width, height;
 static void yo22_size(int w, int h) {
   width = w, height = h;
 }
@@ -190,7 +205,10 @@ static void yo22_size(int w, int h) {
 static int program_counter = 0;
 
 static void yo22_paint(float t) {
-  bind_texture(TexNoise8U, 0);
+  u_time = t;
+  u_progress = (float)program_counter / TOTAL_ITERATIONS;
+
+  bind_texture(TexNoise8U, noise_sampler);
   if (program_counter == 0) {
     bind_framebuffer(TexTerrain0);
     use_program(ProgTerrainGenerate);
@@ -200,11 +218,10 @@ static void yo22_paint(float t) {
   if (program_counter < TERRAIN_ITERATIONS) {
     bind_framebuffer(TexTerrain1);
     use_program(ProgTerrainErode);
-    bind_texture(TexTerrain0, 1);
-    uniform1i("T", 1);
+    bind_texture(TexTerrain0, terrain_sampler);
     compute();
     bind_framebuffer(TexTerrain0);
-    bind_texture(TexTerrain1, 1);
+    bind_texture(TexTerrain1, terrain_sampler);
     compute();
   }
 
@@ -215,31 +232,24 @@ static void yo22_paint(float t) {
       glClear(GL_COLOR_BUFFER_BIT);
     }
     use_program(ProgTrace);
-    bind_texture(TexTerrain0, 1);
-    uniform1i("T", 1);
+    bind_texture(TexTerrain0, terrain_sampler);
     glEnable(GL_BLEND);
     compute();
     glDisable(GL_BLEND);
   }
 
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glViewport(0, 0, width, height);
+  use_program(ProgPostprocess);
+  bind_texture(TexFrame, frame_sampler);
+  bind_texture(TexTerrain0, terrain_sampler);
+  compute();
+
+  ++program_counter;
   if (program_counter >= TOTAL_ITERATIONS)
     program_counter = TOTAL_ITERATIONS;
   //else
   //  fprintf(stderr, "%d%c", program_counter, program_counter%16==15 ? '\n' : ' ');
-
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
-  glViewport(0, 0, width, height);
-  use_program(ProgPostprocess);
-  uniform1f("t", t);
-  uniform1f("P", (float)program_counter / TOTAL_ITERATIONS);
-  uniform2f("S", width, height);
-  bind_texture(TexFrame, 1);
-  uniform1i("F", 1);
-  bind_texture(TexTerrain0, 2);
-  uniform1i("T", 2);
-  compute();
-
-  ++program_counter;
 }
 
 struct file_program_t {
@@ -336,17 +346,13 @@ static void monitor_changes() {
   for (i = 0; i < Prog_COUNT; ++i)
     if (files[i].updated != 0) {
       char *src = read_file(files[i].filename);
-      GLuint newprog;
       files[i].updated = 0;
       if (!src) continue;
-      fprintf(stderr, "load program %d ... ", i);
-      newprog = create_and_compile_program(src);
-      if (newprog == 0) continue;
       if (fragment_shaders[i] != NULL)
         free((char*)fragment_shaders[i]);
       fragment_shaders[i] = src;
-      glDeleteProgram(programs[i]);
-      programs[i] = newprog;
+      fprintf(stderr, "loading program %d ... ", i);
+      if (0 == create_and_compile_program(i)) continue;
       if (program_counter > files[i].program_counter)
         program_counter = files[i].program_counter;
     }
