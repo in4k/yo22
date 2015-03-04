@@ -7,9 +7,11 @@ float vn(vec2 v,vec2 m) {
 }
 float fbm(vec2 v,float s) {
   float r=0.,k=.5;
-  for(int i=0;i<16;++i,k*=.5,s*=2.)r+=k*vn(v*s,s);
+  for(int i=0;i<12;++i,k*=.5,s*=2.)r+=k*vn(v*s,s);
   return r;
 }
 void main() {
-  gl_FragColor = 400.+fbm(gl_FragCoord.xy/4096.,16.)*300.;
+  float height = fbm(gl_FragCoord.xy/4096.,7.);
+  height = pow(height, 3.) * 1000.;
+  gl_FragColor = vec4(0., 0., height, 0.);
 }

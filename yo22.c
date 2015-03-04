@@ -104,8 +104,8 @@ static void bind_framebuffer(int target_index) {
 static GLuint program;
 
 static float u_time, u_progress;
-static int width, height;
 static const int noise_sampler = 0, terrain_sampler = 1, frame_sampler = 2;
+static int width, height;
 
 static void use_program(int index) {
   program = programs[index];
@@ -198,6 +198,31 @@ static void yo22_init() {
     create_and_compile_program(i);
 }
 
+/*
+static float camera[16];
+static void cross(const float *a, const float *b, float *out) {
+  out[0] = a[1] * b[2] - a[2] * b[1];
+  out[1] = a[2] * b[0] - a[0] * b[2];
+  out[2] = a[0] * b[1] - a[1] * b[0];
+}
+static float dot(const float *a, const float *b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+static float sqrtf(float f){asm("fld %0;fsqrt;fstp %0;":"+m"(f));return f;}
+static void normalize(float *v) {
+  float k = 1. / sqrtf(dot(v,v));
+  v[0] *= k; v[1] *= k; v[2] *= k;
+}
+static void camera_set(float px, float py, float pz, float ax, float ay, float az) {
+}
+static void camera_move(float fwd, float right, float up) {
+}
+static void camera_rotate_pitch(float fwd) {
+}
+static void camera_rotate_yaw(float fwd) {
+}
+*/
+
 static void yo22_size(int w, int h) {
   width = w, height = h;
 }
@@ -216,13 +241,14 @@ static void yo22_paint(float t) {
   }
 
   if (program_counter < TERRAIN_ITERATIONS) {
+    int j;for(j=0;j<8;++j){
     bind_framebuffer(TexTerrain1);
     use_program(ProgTerrainErode);
     bind_texture(TexTerrain0, terrain_sampler);
     compute();
     bind_framebuffer(TexTerrain0);
     bind_texture(TexTerrain1, terrain_sampler);
-    compute();
+    compute();}
   }
 
   if (program_counter >= TERRAIN_ITERATIONS && program_counter < (TERRAIN_ITERATIONS + TRACE_ITERATIONS)) {
