@@ -25,6 +25,10 @@ vec3 albedo(vec3 p){
   float m100 = mod(floor(p.x/100.)+floor(p.z/100.),2.);
   float m1000 = mod(floor(p.x/1000.)+floor(p.z/1000.),2.);
   return vec3(m10,m100,m1000)*(.3+.7*mod(floor(p.x)+floor(p.z),2.));
+#elif 1
+  float XZ = mod(floor(p.x/1.)+floor(p.z/1.),2.);
+  float Y=mod(floor(p.y),2.);
+  return vec3(.2+.5*Y+.3*XZ);
 #else
   return texture2D(_T,p.xz/4096.,-20.).xyw*10.;
 #endif
