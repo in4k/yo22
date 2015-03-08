@@ -1,28 +1,50 @@
 #ifdef __linux__
+#define PLATFORM_POSIX
+#define PLATFORM_LINUX
+#define PLATFORM_X11
+#elif defined(__MACH__) && defined(__APPLE__)
+#define PLATFORM_POSIX
+#define PLATFORM_OSX
+#else
+#error Not ported
+#endif
+
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <limits.h>
+#include <unistd.h>
+#include <errno.h>
+
+#ifdef PLATFORM_POSIX
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <unistd.h>
-#include <sys/inotify.h>
-#include <errno.h>
+#endif
 
+#ifdef PLATFORM_LINUX
+#include <sys/inotify.h>
+#endif
+
+#ifdef PLATFORM_X11
 #define GL_GLEXT_PROTOTYPES 1
 #include <X11/Xlib.h>
 #include <GL/glx.h>
 #include <GL/gl.h>
 #include <GL/glext.h>
+#endif
 
+#ifdef PLATFORM_POSIX
 static void report_n_abort(const char *file, int line, const char *message) {
   fprintf(stderr, "error @ %s:%d : %s\n", file, line, message);
   exit(-1);
 }
+#endif
 
-#else
-#error not ported
+#ifdef PLATFORM_OSX
+#include <sys/event.h>
+#include <GLUT/GLUT.h>
+#include <OpenGL/gl3.h>
 #endif
 
 #define CHECK(cond, errmsg) if (!(cond)) report_n_abort(__FILE__, __LINE__, errmsg);
@@ -278,14 +300,7 @@ static void yo22_paint(float t) {
   //  fprintf(stderr, "%d%c", program_counter, program_counter%16==15 ? '\n' : ' ');
 }
 
-struct file_program_t {
-  const char *filename;
-  int program_counter;
-  int watch;
-  int updated;
-};
-static struct file_program_t files[Prog_COUNT];
-static int inotifyfd;
+#ifdef PLATFORM_POSIX
 static char *read_file(const char *filename) {
   ssize_t rd;
   struct stat st;
@@ -324,7 +339,17 @@ error:
   if (fd != -1) close(fd);
   return NULL;
 }
+#endif
 
+#ifdef PLATFORM_LINUX
+struct file_program_t {
+  const char *filename;
+  int program_counter;
+  int watch;
+  int updated;
+};
+static struct file_program_t files[Prog_COUNT];
+static int inotifyfd;
 static void monitor_changes() {
   char buffer[sizeof(struct inotify_event) + NAME_MAX + 1];
   int i;
@@ -383,8 +408,9 @@ static void monitor_changes() {
         program_counter = files[i].program_counter;
     }
 }
+#endif // PLATFORM_LINUX
 
-#if __linux__
+#ifdef PLATFORM_X11
 static const int glxattribs[] = {
   GLX_X_RENDERABLE, True,
   GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT,
@@ -507,6 +533,113 @@ int main(int argc, char *argv[]) {
 
   return 0;
 }
-#else //if __linux__
-#error not ported
+#endif // PLATFORM_X11
+
+#ifdef PLATFORM_OSX
+struct file_program_t {
+  const char *filename;
+  int fd;
+  int program_counter;
+  int updated;
+};
+static struct file_program_t files[Prog_COUNT];
+static int kqfd;
+static void monitor_changes() {
+  int i;
+  for (i = 0; i < Prog_COUNT; ++i) {
+    struct kevent e;
+    struct file_program_t *f = files + i;
+    if (f->fd > 0) continue;
+    
+    f->fd = open(f->filename, 0);
+    if (f->fd == -1) continue;
+    e.ident = f->fd;
+    e.filter = EVFILT_VNODE;
+    e.flags = EV_ADD | EV_CLEAR;
+    e.fflags = NOTE_DELETE | NOTE_WRITE | NOTE_EXTEND | NOTE_RENAME | NOTE_REVOKE;
+    e.data = 0;
+    e.udata = f;
+    int result = kevent(kqfd, &e, 1, NULL, 0, NULL);
+    if (result == -1) {
+      close(f->fd);
+      f->fd = -1;
+      continue;
+    }
+    f->updated = 1;
+    fprintf(stderr, "Listening for events on %s\n", f->filename);
+  }
+  
+  for (;;) {
+    struct kevent e;
+    struct file_program_t *f;
+    struct timespec ts = {0, 0};
+    int result = kevent(kqfd, NULL, 0, &e, 1, &ts);
+    CHECK(result != -1, "kevent");
+    if (result == 0) break;
+    
+    f = e.udata;
+    CHECK(f < files + Prog_COUNT, "kevent.udata");
+    if (e.fflags & (NOTE_DELETE | NOTE_RENAME | NOTE_REVOKE)) {
+      close(f->fd); /* will also EV_DELETE the kevent */
+      f->fd = -1;
+      continue;
+    }
+    
+    f->updated = 1;
+  }
+  
+  for (i = 0; i < Prog_COUNT; ++i)
+    if (files[i].updated > 0) {
+      char *src = read_file(files[i].filename);
+      files[i].updated = 0;
+      if (!src) continue;
+      if (fragment_shaders[i] != NULL)
+        free((char*)fragment_shaders[i]);
+      fragment_shaders[i] = src;
+      fprintf(stderr, "loading program %d ... ", i);
+      if (0 == create_and_compile_program(i)) continue;
+      if (program_counter > files[i].program_counter)
+        program_counter = files[i].program_counter;
+    }
+}
+
+static void glut_display() {
+    monitor_changes();
+    static int f = 0;
+    yo22_paint(f++ / 100.);
+    glutSwapBuffers();
+    glutPostRedisplay();
+}
+
+int main(int argc, char *argv[]) {
+  glutInit(&argc, argv);
+  
+  files[ProgTerrainGenerate].filename = "generator.glsl";/*argv[1];*/
+  files[ProgTerrainGenerate].program_counter = 0;
+  files[ProgTerrainGenerate].updated = 1;
+  files[ProgTerrainGenerate].fd = -1;
+  files[ProgTerrainErode].filename = "eroder.glsl";/*argv[2];*/
+  files[ProgTerrainErode].program_counter = 0;
+  files[ProgTerrainErode].updated = 1;
+  files[ProgTerrainErode].fd = -1;
+  files[ProgTrace].filename = "tracer.glsl";/*argv[3];*/
+  files[ProgTrace].program_counter = TERRAIN_ITERATIONS;
+  files[ProgTrace].updated = 1;
+  files[ProgTrace].fd = -1;
+  files[ProgPostprocess].filename = "postprocessor.glsl"/*argv[4]*/;
+  files[ProgPostprocess].program_counter = TOTAL_ITERATIONS;
+  files[ProgPostprocess].updated = 1;
+  files[ProgPostprocess].fd = -1;
+
+  kqfd = kqueue();
+  CHECK(kqfd != -1, "kqueue");
+  
+  glutCreateWindow("yo22");
+  glutReshapeWindow(WIDTH, HEIGHT);
+  yo22_init();
+  glutDisplayFunc(glut_display);
+  glutReshapeFunc(yo22_size);
+  //glutKeyboardFunc(void (*func)(unsigned char key, int x, int y));
+  glutMainLoop();
+}
 #endif
