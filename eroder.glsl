@@ -8,8 +8,8 @@ Ks = 1.0;
 float transfer(float H,float w,vec2 ofs){
   vec4 c=texture2D(_T,(gl_FragCoord.xy+ofs)/4096.,-20.);
   float h=c.w+c.z,d=H-h;
-  if(d>0.)return -min(w,d)/4.;
-  else return min(c.w,-d)/4.;
+  if(d>0.)return -min(w,d);
+  else return min(c.w,-d);
 }
 void main(){
   vec4 c=texture2D(_T,(gl_FragCoord.xy)/4096.,-20.);
@@ -21,11 +21,11 @@ void main(){
   dw+=transfer(h,c.w,e.yx);
   dw+=transfer(h,c.w,-e.xy);
   dw+=transfer(h,c.w,-e.yx);
-  /*dw+=transfer(h,c.w,vec2(1.,1.));
+  dw+=transfer(h,c.w,vec2(1.,1.));
   dw+=transfer(h,c.w,vec2(1.,1.));
   dw+=transfer(h,c.w,-vec2(1.,1.));
-  dw+=transfer(h,c.w,-vec2(1.,1.));*/
-  c.w+=dw;
+  dw+=transfer(h,c.w,-vec2(1.,1.));
+  c.w+=dw/8.;
   // 2. evaporate
   dw=c.w*Ke;
   c.z+=dw*Ks;

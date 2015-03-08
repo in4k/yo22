@@ -34,7 +34,7 @@ vec3 albedo(vec3 p){
 #endif
 }
 void main(){
-  if (gl_FragCoord.y<16.){gl_FragColor=step(V.x*.5+.5,_p);return;}
+  if (gl_FragCoord.y<16.){gl_FragColor=vec4(step(V.x*.5+.5,_p));return;}
   vec2 uv=gl_FragCoord.xy/_r-.5;uv.x*=_r.x/_r.y;
   vec3 O=vec3(sin(t)*1000.,50.,cos(t)*1000.),D=normalize(vec3(uv,-2.));
   //for(int i=0;i<16.
