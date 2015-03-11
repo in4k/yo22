@@ -11,7 +11,7 @@ float fbm(vec2 v,float s) {
   return r;
 }
 void main() {
-  float height = fbm(gl_FragCoord.xy/4096.,17.);
+  float height = fbm(gl_FragCoord.xy/4096.,7.);
   height = pow(height, 3.) * 800.;
   gl_FragColor = vec4(0., 0., height, 0.);
 }

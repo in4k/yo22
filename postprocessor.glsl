@@ -1,7 +1,13 @@
-uniform float _t, _p;
+uniform float _t, _p, _pt;
 uniform vec2 _r;
 uniform sampler2D _N,_T,_F;
 varying vec2 V;
+#if 1
+void main(){
+  if (gl_FragCoord.y<16.){gl_FragColor=vec4(step(V.x*.5+.5,_p));return;}
+  gl_FragColor = texture2D(_F,gl_FragCoord.xy/_r,-20.)*.1/(1.+256.*_pt);
+}
+#else
 float t=_t*.001;
 float h(vec2 p){
   vec4 c=texture2D(_T,p/4096.,-20.);
@@ -70,3 +76,4 @@ void main(){
   //vec3 color = (O+D*l) / vec3(3000.,1000.,3000.);
   gl_FragColor = vec4(pow(color,vec3(1./2.2)),1.);
 }
+#endif

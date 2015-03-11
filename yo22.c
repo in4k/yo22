@@ -55,8 +55,8 @@ static void report_n_abort(const char *file, int line, const char *message) {
 #define NOISE_SIZE 1024
 #define TERRAIN_SIZE 4096
 
-#define TERRAIN_ITERATIONS 256
-#define TRACE_ITERATIONS 256
+#define TERRAIN_ITERATIONS 8/*256*/
+#define TRACE_ITERATIONS 1024
 #define TOTAL_ITERATIONS (TERRAIN_ITERATIONS + TRACE_ITERATIONS)
 
 static unsigned int noise_buffer[NOISE_SIZE * NOISE_SIZE];
@@ -105,10 +105,10 @@ static GLuint framebuffer;
 static GLuint vertex_shader;
 static GLuint programs[Prog_COUNT];
 static struct {
-  GLint time, progress, target_res, noise, terrain, frame;
+  GLint time, progress, progress_erosion, progress_trace, target_res, noise, terrain, frame;
 } program_locs[Prog_COUNT];
 static const char *uniform_names[] = {
-  "_t", "_p", "_r", "_N", "_T", "_F", 0
+  "_t", "_p", "_pe", "_pt", "_r", "_N", "_T", "_F", 0
 };
 
 static void bind_texture(int index, int sampler) {
@@ -125,7 +125,7 @@ static void bind_framebuffer(int target_index) {
 
 static GLuint program;
 
-static float u_time, u_progress;
+static float u_time, u_progress, u_progress_erosion, u_progress_trace;
 static const int noise_sampler = 0, terrain_sampler = 1, frame_sampler = 2;
 static int width, height;
 
@@ -134,6 +134,8 @@ static void use_program(int index) {
   glUseProgram(program);
   glUniform1f(program_locs[index].time, u_time);
   glUniform1f(program_locs[index].progress, u_progress);
+  glUniform1f(program_locs[index].progress_erosion, u_progress_erosion);
+  glUniform1f(program_locs[index].progress_trace, u_progress_trace);
   glUniform2f(program_locs[index].target_res, (float)width, (float)height);
   glUniform1i(program_locs[index].noise, noise_sampler);
   glUniform1i(program_locs[index].terrain, terrain_sampler);
@@ -254,6 +256,8 @@ static int program_counter = 0;
 static void yo22_paint(float t) {
   u_time = t;
   u_progress = (float)program_counter / TOTAL_ITERATIONS;
+  u_progress_erosion = program_counter < TERRAIN_ITERATIONS ? (float)program_counter / TERRAIN_ITERATIONS : 1.f;
+  u_progress_trace = program_counter < TRACE_ITERATIONS ? (float)(program_counter - TERRAIN_ITERATIONS) / (TRACE_ITERATIONS-TERRAIN_ITERATIONS) : 1.f;
 
   bind_texture(TexNoise8U, noise_sampler);
   if (program_counter == 0) {
@@ -273,7 +277,7 @@ static void yo22_paint(float t) {
     compute();}
   }
 
-  if (program_counter >= TERRAIN_ITERATIONS && program_counter < (TERRAIN_ITERATIONS + TRACE_ITERATIONS)) {
+  if (program_counter >= TERRAIN_ITERATIONS && program_counter < TOTAL_ITERATIONS) {
     bind_framebuffer(TexFrame);
     if (program_counter == TERRAIN_ITERATIONS) {
       glClearColor(0,0,0,0);
@@ -282,6 +286,7 @@ static void yo22_paint(float t) {
     use_program(ProgTrace);
     bind_texture(TexTerrain0, terrain_sampler);
     glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     compute();
     glDisable(GL_BLEND);
   }

@@ -2,7 +2,7 @@ uniform float _p;
 uniform sampler2D _N,_T;
 varying vec2 V;
 float
-Kr = 0.1,
+Kr = 0.01,
 Ke = 0.6,
 Ks = 1.0;
 float transfer(float H,float w,vec2 ofs){
