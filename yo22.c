@@ -5,6 +5,8 @@
 #elif defined(__MACH__) && defined(__APPLE__)
 #define PLATFORM_POSIX
 #define PLATFORM_OSX
+#elif defined(_WIN32)
+#define PLATFORM_WINDOWS
 #else
 #error Not ported
 #endif
@@ -13,13 +15,19 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <limits.h>
-#include <unistd.h>
 #include <errno.h>
 
 #ifdef PLATFORM_POSIX
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#endif
+
+#ifdef PLATFORM_OSX
+#include <sys/event.h>
+#include <GLUT/GLUT.h>
+#include <OpenGL/gl3.h>
 #endif
 
 #ifdef PLATFORM_LINUX
@@ -34,6 +42,46 @@
 #include <GL/glext.h>
 #endif
 
+#ifdef PLATFORM_WINDOWS
+#define WIN32_LEAN_AND_MEAN 1
+#define NOMINMAX
+#include <Windows.h>
+#include <GL/gl.h>
+#include "glext.h"
+#endif
+
+#define FUNCLIST \
+  FUNCLIST_DO(PFNGLACTIVETEXTUREPROC, ActiveTexture) \
+  FUNCLIST_DO(PFNGLCREATESHADERPROC, CreateShader) \
+  FUNCLIST_DO(PFNGLSHADERSOURCEPROC, ShaderSource) \
+  FUNCLIST_DO(PFNGLCOMPILESHADERPROC, CompileShader) \
+  FUNCLIST_DO(PFNGLGENFRAMEBUFFERSPROC, GenFramebuffers) \
+  FUNCLIST_DO(PFNGLBINDFRAMEBUFFERPROC, BindFramebuffer) \
+  FUNCLIST_DO(PFNGLFRAMEBUFFERTEXTURE2DPROC, FramebufferTexture2D) \
+  FUNCLIST_DO(PFNGLUSEPROGRAMPROC, UseProgram) \
+  FUNCLIST_DO(PFNGLUNIFORM1FPROC, Uniform1f) \
+  FUNCLIST_DO(PFNGLUNIFORM2FPROC, Uniform2f) \
+  FUNCLIST_DO(PFNGLUNIFORM1IPROC, Uniform1i) \
+  FUNCLIST_DO(PFNGLCREATEPROGRAMPROC, CreateProgram) \
+  FUNCLIST_DO(PFNGLATTACHSHADERPROC, AttachShader) \
+  FUNCLIST_DO(PFNGLBINDATTRIBLOCATIONPROC, BindAttribLocation) \
+  FUNCLIST_DO(PFNGLLINKPROGRAMPROC, LinkProgram) \
+  FUNCLIST_DO(PFNGLGETUNIFORMLOCATIONPROC, GetUniformLocation)
+#ifndef DEBUG
+#define FUNCLIST_DBG
+#else
+#define FUNCLIST_DBG \
+  FUNCLIST_DO(PFNGLDELETESHADERPROC, DeleteShader) \
+  FUNCLIST_DO(PFNGLGETPROGRAMINFOLOGPROC, GetProgramInfoLog) \
+  FUNCLIST_DO(PFNGLDELETEPROGRAMPROC, DeleteProgram) \
+  FUNCLIST_DO(PFNGLGETSHADERIVPROC, GetShaderiv) \
+  FUNCLIST_DO(PFNGLGETSHADERINFOLOGPROC, GetShaderInfoLog) \
+  FUNCLIST_DO(PFNGLGETPROGRAMIVPROC, GetProgramiv) \
+  FUNCLIST_DO(PFNGLCHECKFRAMEBUFFERSTATUSPROC, CheckFramebufferStatus) \
+  FUNCLIST_DO(PFNGLENABLEVERTEXATTRIBARRAYPROC, EnableVertexAttribArray) \
+  FUNCLIST_DO(PFNGLVERTEXATTRIBPOINTERPROC, VertexAttribPointer)
+#endif
+
 #ifdef PLATFORM_POSIX
 static void report_n_abort(const char *file, int line, const char *message) {
   fprintf(stderr, "error @ %s:%d : %s\n", file, line, message);
@@ -41,13 +89,35 @@ static void report_n_abort(const char *file, int line, const char *message) {
 }
 #endif
 
-#ifdef PLATFORM_OSX
-#include <sys/event.h>
-#include <GLUT/GLUT.h>
-#include <OpenGL/gl3.h>
+#ifdef PLATFORM_WINDOWS
+#define FUNCLIST_DO(T,N) "gl" #N "\0"
+static const char *gl_names =
+FUNCLIST FUNCLIST_DBG
+;
+#undef FUNCLIST_DO
+
+static struct {
+#define FUNCLIST_DO(T,N) T N;
+FUNCLIST FUNCLIST_DBG
+#undef FUNCLIST_DO
+} gl;
+#define FUNCLIST_DO(T,N) ;
+FUNCLIST FUNCLIST_DBG
+#undef FUNCLIST_DO
+
+static void report_n_abort(const char *file, int line, const char *message) {
+  char buf[256];
+  _snprintf_s(buf, sizeof(buf), sizeof(buf)-1, "error @ %s:%d : %s\n", file, line, message);
+  MessageBoxA(0, message, buf, MB_ICONSTOP);
+  ExitProcess(-1);
+}
 #endif
 
+#ifdef DEBUG
 #define CHECK(cond, errmsg) if (!(cond)) report_n_abort(__FILE__, __LINE__, errmsg);
+#else
+#define CHECK(cond, errmsg)
+#endif
 
 #define WIDTH 1280
 #define HEIGHT 720
@@ -59,11 +129,18 @@ static void report_n_abort(const char *file, int line, const char *message) {
 #define TRACE_ITERATIONS 1024
 #define TOTAL_ITERATIONS (TERRAIN_ITERATIONS + TRACE_ITERATIONS)
 
+
+
 static unsigned int noise_buffer[NOISE_SIZE * NOISE_SIZE];
-static unsigned long long rand_state = 0x31337;
-static unsigned int random_lcg() {
-  rand_state = rand_state * 636436223846793005ull + 1442695040888963407ull;
-  return (unsigned int)(rand_state >> 24);
+
+static unsigned int prng__() {
+  static unsigned int state = 5323u;
+  state = (1103515245u * state + 12345u);
+  return state >> 16;
+}
+
+static unsigned int prng() {
+  return (prng__() | (prng__() << 16)) ^ (prng__() << 8);
 }
 
 enum {
@@ -91,11 +168,11 @@ enum {
   Prog_COUNT
 };
 
-/* extern static const char *fragment_shaders[Prog_COUNT];
-#include "shaders.c"
-*/
-
+#ifndef TOOL
+#include "shaders.h"
+#else
 static const char *fragment_shaders[Prog_COUNT] = {NULL, NULL, NULL, NULL};
+#endif
 
 static const char *vertex_shader_source[] = {"attribute vec4 v;varying vec2 V;void main(){gl_Position=v;V=v.xy;}"};
 /*static char *common_shader_header = 0;*/
@@ -112,14 +189,14 @@ static const char *uniform_names[] = {
 };
 
 static void bind_texture(int index, int sampler) {
-  glActiveTexture(GL_TEXTURE0 + sampler);
+  gl.ActiveTexture(GL_TEXTURE0 + sampler);
   glBindTexture(GL_TEXTURE_2D, textures[index]);
 }
 
 static void bind_framebuffer(int target_index) {
-  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textures[target_index], 0);
-  CHECK(GL_FRAMEBUFFER_COMPLETE == glCheckFramebufferStatus(GL_FRAMEBUFFER), "framebuffer is not complete");
+  gl.BindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+  gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textures[target_index], 0);
+  CHECK(GL_FRAMEBUFFER_COMPLETE == gl.CheckFramebufferStatus(GL_FRAMEBUFFER), "framebuffer is not complete");
   glViewport(0, 0, tex_widths[target_index], tex_heights[target_index]);
 }
 
@@ -131,15 +208,15 @@ static int width, height;
 
 static void use_program(int index) {
   program = programs[index];
-  glUseProgram(program);
-  glUniform1f(program_locs[index].time, u_time);
-  glUniform1f(program_locs[index].progress, u_progress);
-  glUniform1f(program_locs[index].progress_erosion, u_progress_erosion);
-  glUniform1f(program_locs[index].progress_trace, u_progress_trace);
-  glUniform2f(program_locs[index].target_res, (float)width, (float)height);
-  glUniform1i(program_locs[index].noise, noise_sampler);
-  glUniform1i(program_locs[index].terrain, terrain_sampler);
-  glUniform1i(program_locs[index].frame, frame_sampler);
+  gl.UseProgram(program);
+  gl.Uniform1f(program_locs[index].time, u_time);
+  gl.Uniform1f(program_locs[index].progress, u_progress);
+  gl.Uniform1f(program_locs[index].progress_erosion, u_progress_erosion);
+  gl.Uniform1f(program_locs[index].progress_trace, u_progress_trace);
+  gl.Uniform2f(program_locs[index].target_res, (float)width, (float)height);
+  gl.Uniform1i(program_locs[index].noise, noise_sampler);
+  gl.Uniform1i(program_locs[index].terrain, terrain_sampler);
+  gl.Uniform1i(program_locs[index].frame, frame_sampler);
 }
 
 static void compute() {
@@ -147,55 +224,67 @@ static void compute() {
 }
 
 static GLuint create_and_compile_shader(int type, int n, const char **source) {
-  GLint status;
-  GLuint shader = glCreateShader(type);
+  GLuint shader = gl.CreateShader(type);
   CHECK(shader != 0, "glCreateShader");
-  glShaderSource(shader, n, source, NULL);
-  glCompileShader(shader);
+  gl.ShaderSource(shader, n, source, NULL);
+  gl.CompileShader(shader);
 
-  glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
-  if (status != GL_TRUE) {
-    char errorbuf[4096];
-    glGetShaderInfoLog(shader, sizeof(errorbuf), NULL, errorbuf);
-    fprintf(stderr, "compile error:\n%s\n", errorbuf);
-    glDeleteShader(shader);
-    shader = 0;
+#ifdef DEBUG
+  {
+    GLint status;
+    gl.GetShaderiv(shader, GL_COMPILE_STATUS, &status);
+    if (status != GL_TRUE) {
+      char errorbuf[4096];
+      gl.GetShaderInfoLog(shader, sizeof(errorbuf), NULL, errorbuf);
+      fprintf(stderr, "compile error:\n%s\n", errorbuf);
+      gl.DeleteShader(shader);
+      shader = 0;
+    }
   }
+#endif
   return shader;
 }
 
 static GLuint create_and_compile_program(int index) {
-  GLint status;
   int i;
+#ifdef DEBUG
+  GLint status;
   if (fragment_shaders[index] == 0) return 0;
+#endif
+
   /*const char *sources[] = {common_shader_header, fragment_source};
   GLuint fragment = create_and_compile_shader(GL_FRAGMENT_SHADER, 2, sources);*/
   GLuint fragment = create_and_compile_shader(GL_FRAGMENT_SHADER, 1, fragment_shaders + index);
-  GLuint program = glCreateProgram();
-  glAttachShader(program, fragment);
-  glAttachShader(program, vertex_shader);
-  glBindAttribLocation(program, 0, "v");
-  glLinkProgram(program);
+  GLuint program = gl.CreateProgram();
+  gl.AttachShader(program, fragment);
+  gl.AttachShader(program, vertex_shader);
+  gl.BindAttribLocation(program, 0, "v");
+  gl.LinkProgram(program);
 
-  glDeleteShader(fragment);
-  glGetProgramiv(program, GL_LINK_STATUS, &status);
+#ifdef DEBUG
+  gl.DeleteShader(fragment);
+  gl.GetProgramiv(program, GL_LINK_STATUS, &status);
   if (status != GL_TRUE) {
     char errorbuf[4096];
-    glGetProgramInfoLog(program, sizeof(errorbuf), NULL, errorbuf);
+    gl.GetProgramInfoLog(program, sizeof(errorbuf), NULL, errorbuf);
     fprintf(stderr, "link error:\n%s\n", errorbuf);
-    glDeleteProgram(program);
-    glDeleteShader(fragment);
+    gl.DeleteProgram(program);
+    gl.DeleteShader(fragment);
     return 0;
   }
   fprintf(stderr, "Linked\n");
 
-  for (i = 0; uniform_names[i] != 0; ++i) {
-    ((GLint*)(program_locs + index))[i] = glGetUniformLocation(program, uniform_names[i]);
+#endif
+    for (i = 0; uniform_names[i] != 0; ++i) {
+    ((GLint*)(program_locs + index))[i] = gl.GetUniformLocation(program, uniform_names[i]);
+#ifdef DEBUG
     fprintf(stderr, "  %s loc = %d  ", uniform_names[i], ((GLint*)(program_locs + index))[i]);
+#endif
   }
+#ifdef DEBUG
   fprintf(stderr, "\n");
-
-  glDeleteProgram(programs[index]);
+  gl.DeleteProgram(programs[index]);
+#endif
   programs[index] = program;
   return program;
 }
@@ -205,10 +294,10 @@ static void yo22_init() {
   vertex_shader = create_and_compile_shader(GL_VERTEX_SHADER, 1, vertex_shader_source);
   CHECK(vertex_shader != 0, "vertex shader");
   for (i = 0; i < NOISE_SIZE * NOISE_SIZE; ++i)
-    noise_buffer[i] = random_lcg();
+    noise_buffer[i] = prng(); /*random_lcg();*/
 
   glGenTextures(Tex_COUNT, textures);
-  glGenFramebuffers(1, &framebuffer);
+  gl.GenFramebuffers(1, &framebuffer);
   for (i = 0; i < Tex_COUNT; ++i) {
     glBindTexture(GL_TEXTURE_2D, textures[i]);
     glTexImage2D(GL_TEXTURE_2D, 0, (i==TexNoise8U)?GL_RGBA:GL_RGBA32F,
@@ -291,7 +380,7 @@ static void yo22_paint(float t) {
     glDisable(GL_BLEND);
   }
 
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
   glViewport(0, 0, width, height);
   use_program(ProgPostprocess);
   bind_texture(TexFrame, frame_sampler);
@@ -646,5 +735,57 @@ int main(int argc, char *argv[]) {
   glutReshapeFunc(yo22_size);
   //glutKeyboardFunc(void (*func)(unsigned char key, int x, int y));
   glutMainLoop();
+}
+#endif
+
+#ifdef PLATFORM_WINDOWS
+static PIXELFORMATDESCRIPTOR pfd = {sizeof(pfd), 0, PFD_DOUBLEBUFFER | PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL,
+  PFD_TYPE_RGBA, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+#ifdef __cplusplus
+#error no
+#endif
+#ifdef DEBUG
+int WINAPI WinMain(HINSTANCE a, HINSTANCE b, LPCWSTR c, int d) {
+#else
+void WinMainCRTStartup() {
+#endif
+  HWND w; 
+  HDC dc;
+  RECT r;
+  MSG m;
+  const char *fnn = gl_names;
+  PROC* fn = &gl;
+
+  w = CreateWindowExA(0,"static",0,0x91000000,0,0,0,0,0,0,0,0);
+  dc = GetDC(w);
+  GetWindowRect(w, &r);
+  SetPixelFormat(dc, ChoosePixelFormat(dc, &pfd), &pfd);
+  wglMakeCurrent(dc, wglCreateContext(dc));
+
+  for (; gl_names[0] != 0; ++fn) {
+    *fn = wglGetProcAddress(gl_names);
+     while (gl_names[0] != 0) ++gl_names;
+     ++gl_names;
+  }
+
+  yo22_init();
+  yo22_size(r.right - r.left, r.bottom - r.top);
+
+  //ShowWindow(w, SW_SHOW);
+  ShowCursor(FALSE);
+
+  while (!GetAsyncKeyState(VK_ESCAPE)) {
+    while (0 != PeekMessage(&m, w, 0, 0, PM_NOREMOVE)) {
+      if (0 == GetMessage(&m, NULL, 0, 0)) goto exit;
+      //TranslateMessage(&m);
+      DispatchMessage(&m);
+    }
+
+    yo22_paint(u_time + .001);
+    SwapBuffers(dc);
+  }
+
+exit:
+  ExitProcess(0);
 }
 #endif
