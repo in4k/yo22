@@ -105,12 +105,14 @@ FUNCLIST FUNCLIST_DBG
 FUNCLIST FUNCLIST_DBG
 #undef FUNCLIST_DO
 
+#if DEBUG
 static void report_n_abort(const char *file, int line, const char *message) {
   char buf[256];
   _snprintf_s(buf, sizeof(buf), sizeof(buf)-1, "error @ %s:%d : %s\n", file, line, message);
   MessageBoxA(0, message, buf, MB_ICONSTOP);
   ExitProcess(-1);
 }
+#endif
 #endif
 
 #ifdef DEBUG
@@ -133,14 +135,18 @@ static void report_n_abort(const char *file, int line, const char *message) {
 
 static unsigned int noise_buffer[NOISE_SIZE * NOISE_SIZE];
 
-static unsigned int prng__() {
-  static unsigned int state = 5323u;
-  state = (1103515245u * state + 12345u);
-  return state >> 16;
+static unsigned int prng_state = 5323u;
+
+static unsigned int prng__() {  
+  prng_state = (1103515245u * prng_state + 12345u);
+  return prng_state >> 16;
 }
 
 static unsigned int prng() {
-  return (prng__() | (prng__() << 16)) ^ (prng__() << 8);
+  unsigned int s0 = prng__();
+  unsigned int s1 = prng__();
+  unsigned int s2 = prng__();
+  return (s0 | (s1 << 16)) ^ (s2 << 8);
 }
 
 enum {
@@ -202,14 +208,14 @@ static void bind_framebuffer(int target_index) {
 
 static GLuint program;
 
-static float u_time, u_progress, u_progress_erosion, u_progress_trace;
+static float u_time = 0, u_progress, u_progress_erosion, u_progress_trace;
 static const int noise_sampler = 0, terrain_sampler = 1, frame_sampler = 2;
 static int width, height;
 
 static void use_program(int index) {
   program = programs[index];
   gl.UseProgram(program);
-  gl.Uniform1f(program_locs[index].time, u_time);
+  gl.Uniform1f(program_locs[index].time, u_time*.001);
   gl.Uniform1f(program_locs[index].progress, u_progress);
   gl.Uniform1f(program_locs[index].progress_erosion, u_progress_erosion);
   gl.Uniform1f(program_locs[index].progress_trace, u_progress_trace);
@@ -291,10 +297,9 @@ static GLuint create_and_compile_program(int index) {
 
 static void yo22_init() {
   int i;
-  vertex_shader = create_and_compile_shader(GL_VERTEX_SHADER, 1, vertex_shader_source);
-  CHECK(vertex_shader != 0, "vertex shader");
+  
   for (i = 0; i < NOISE_SIZE * NOISE_SIZE; ++i)
-    noise_buffer[i] = prng(); /*random_lcg();*/
+    noise_buffer[i] = prng();
 
   glGenTextures(Tex_COUNT, textures);
   gl.GenFramebuffers(1, &framebuffer);
@@ -307,6 +312,9 @@ static void yo22_init() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
   }
+
+  vertex_shader = create_and_compile_shader(GL_VERTEX_SHADER, 1, vertex_shader_source);
+  CHECK(vertex_shader != 0, "vertex shader");
   for (i = 0; i < Prog_COUNT; ++i)
     create_and_compile_program(i);
 }
@@ -342,8 +350,8 @@ static void yo22_size(int w, int h) {
 
 static int program_counter = 0;
 
-static void yo22_paint(float t) {
-  u_time = t;
+static void yo22_paint() {
+  u_time += 1;
   u_progress = (float)program_counter / TOTAL_ITERATIONS;
   u_progress_erosion = program_counter < TERRAIN_ITERATIONS ? (float)program_counter / TERRAIN_ITERATIONS : 1.f;
   u_progress_trace = program_counter < TRACE_ITERATIONS ? (float)(program_counter - TERRAIN_ITERATIONS) / (TRACE_ITERATIONS-TERRAIN_ITERATIONS) : 1.f;
@@ -614,8 +622,7 @@ int main(int argc, char *argv[]) {
 
     monitor_changes();
 
-    static int f = 0;
-    yo22_paint(f++ / 100.);
+    yo22_paint();
     glXSwapBuffers(display, drawable);
   }
 
@@ -699,8 +706,7 @@ static void monitor_changes() {
 
 static void glut_display() {
     monitor_changes();
-    static int f = 0;
-    yo22_paint(f++ / 100.);
+    yo22_paint();
     glutSwapBuffers();
     glutPostRedisplay();
 }
@@ -781,7 +787,7 @@ void WinMainCRTStartup() {
       DispatchMessage(&m);
     }
 
-    yo22_paint(u_time + .001);
+    yo22_paint();
     SwapBuffers(dc);
   }
 
