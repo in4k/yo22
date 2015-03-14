@@ -2,7 +2,6 @@ uniform float _t, _p;
 uniform vec2 _r;
 uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
-float t=_t;
 
 vec4 noise(vec2 p){return texture2D(_N,(p+.5)/1024.,-20.);}
 vec4 terrain(vec2 p_m){return texture2D(_T,p_m/4096.,-20.);}
@@ -206,7 +205,7 @@ void main(){
       vec3 n = geometry_normal(p);
       O = p+n*2.*HIT_EPS;
       D = geometry_bounce(
-        float(i)/float(BOUNCES)+t+noise(gl_FragCoord.xy).z+noise(1024.*vec2(dot(D,p+t*247.))).w,
+        float(i)/float(BOUNCES)+_t*.001+noise(gl_FragCoord.xy).z+noise(1024.*vec2(dot(D,p+_t*247.))).w,
         //float(i)/float(BOUNCES)+t*.01,//+p.x+p.y+p.z,
         p,n,D);
     }

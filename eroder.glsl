@@ -13,9 +13,9 @@ float fbm(vec2 v,float s) {
   return r;
 }
 float
-Kr = 0.02,
-Ke = 0.1,
-Ks = 0.8;
+Kr = 0.27,
+Ke = 0.03,
+Ks = 0.1;
 vec2 uv=floor(gl_FragCoord.xy);
 float transfer(float H,float w,vec2 ofs){
   vec4 c=texture2D(_T,(uv+ofs+vec2(.5))/4096.,-20.);
@@ -34,7 +34,7 @@ void main(){
   dw+=transfer(h,c.w,e.yx);
   dw+=transfer(h,c.w,-e.xy);
   dw+=transfer(h,c.w,-e.yx);
-#if 1
+#if 0
   float kk=1./(4.*sqrt(2.));
   dw+=transfer(h,c.w,vec2(1.,1.))*kk;
   dw+=transfer(h,c.w,vec2(1.,-1.))*kk;
@@ -50,9 +50,9 @@ void main(){
   c.z+=dw*Ks;
   c.w-=dw;
   // 3. rain
-  //dw=Kr*(.01 + 2.2 * max(1.,sin(_t*1000.))*step(.5,vn(floor(uv/16.),vec2(16.))));
-  //dw=Kr*mix(1.,max(0.,mod(floor(_t*10.),2.))*vn(floor(uv/128.),vec2(128.)),1.);
-  dw=Kr*step(.8,vn(uv/128.,vec2(32.))) * mod(floor(_t*30.),2.) * 300.;
+  float sa=sin(_t*373.4111),ca=cos(_t*373.4111);
+  mat2 m=mat2(sa,ca,ca,-sa);
+  dw=Kr*n4((uv+vec2(_t*123.24,317.1141*_t))*m)*step(15.,mod(floor(_t/3.),17.));
   c.z-=dw*Ks;
   c.w+=dw;
   // 4. PROFIT

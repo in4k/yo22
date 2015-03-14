@@ -190,7 +190,7 @@ static GLuint framebuffer;
 static GLuint vertex_shader;
 static GLuint programs[Prog_COUNT];
 static struct {
-  GLint time, progress, progress_erosion, progress_trace, target_res, noise, terrain, plan, frame;
+  GLint step, progress, progress_erosion, progress_trace, target_res, noise, terrain, plan, frame;
 } program_locs[Prog_COUNT];
 static const char *uniform_names[] = {
   "_t", "_p", "_pe", "_pt", "_r", "_N", "_T", "_P", "_F", 0
@@ -221,7 +221,7 @@ static void bind_framebuffer(int target_index) {
   glViewport(0, 0, texinfo[target_index].w, texinfo[target_index].h);
 }
 
-static float u_time = 0, u_progress, u_progress_erosion, u_progress_trace;
+static float u_step = 0, u_progress, u_progress_erosion, u_progress_trace;
 static int width, height;
 
 enum {
@@ -235,7 +235,7 @@ static GLuint program;
 static void use_program(int index) {
   program = programs[index];
   gl.UseProgram(program);
-  gl.Uniform1f(program_locs[index].time, u_time*.001);
+  gl.Uniform1f(program_locs[index].step, u_step);
   gl.Uniform1f(program_locs[index].progress, u_progress);
   gl.Uniform1f(program_locs[index].progress_erosion, u_progress_erosion);
   gl.Uniform1f(program_locs[index].progress_trace, u_progress_trace);
@@ -380,7 +380,7 @@ static void yo22_size(int w, int h) {
 static int program_counter = 0;
 
 static void yo22_paint() {
-  u_time += 1;
+  u_step += 1;
   u_progress = (float)program_counter / PhaseComplete;
   u_progress_erosion = (float)(program_counter - PhaseErodeBegin) / PhaseTerrainErosion_Iter;
   u_progress_trace = (float)(program_counter - PhasePathtraceBegin) / PhasePathtrace_Iter;
