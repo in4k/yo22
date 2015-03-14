@@ -143,7 +143,7 @@ enum {
 };
 
 enum {
-  PhaseTerrainErosion_Iter = 256,
+  PhaseTerrainErosion_Iter = 1024,
   PhasePathtrace_Iter = 1024,
 
   PhaseGenerate = 0,
@@ -196,7 +196,7 @@ static const char *uniform_names[] = {
   "_t", "_p", "_pe", "_pt", "_r", "_N", "_T", "_P", "_F", 0
 };
 
-static unsigned int noise_buffer[NOISE_SIZE * NOISE_SIZE];
+static unsigned int noise_buffer[SizeNoise * SizeNoise];
 static unsigned int prng_state = 5323u;
 static unsigned int prng__() {
   prng_state = (1103515245u * prng_state + 12345u);
@@ -331,7 +331,7 @@ static void create_texture(int index, int width, int height, int type, void *dat
 static void yo22_init() {
   int i;
   
-  for (i = 0; i < NOISE_SIZE * NOISE_SIZE; ++i)
+  for (i = 0; i < SizeNoise * SizeNoise; ++i)
     noise_buffer[i] = prng();
 
   glGenTextures(Tex_COUNT, textures);
@@ -382,6 +382,8 @@ static int program_counter = 0;
 static void yo22_paint() {
   u_time += 1;
   u_progress = (float)program_counter / PhaseComplete;
+  u_progress_erosion = (float)(program_counter - PhaseErodeBegin) / PhaseTerrainErosion_Iter;
+  u_progress_trace = (float)(program_counter - PhasePathtraceBegin) / PhasePathtrace_Iter;
 
   bind_texture(TexNoise8U, SamplerBinding_Noise);
   bind_texture(TexTerrain0, SamplerBinding_Terrain);
@@ -395,8 +397,7 @@ static void yo22_paint() {
   }
 
   if (program_counter < PhaseErodeEnd) {
-    u_progress_erosion = (float)(program_counter - PhaseErodeBegin) / PhaseTerrainErosion_Iter;
-    int j;for(j=0;j<8;++j){
+    int j;for(j=0;j<1;++j){
       bind_framebuffer(TexTerrain1);
       use_program(ProgTerrainErode);
       bind_texture(TexTerrain0, SamplerBinding_Terrain);
@@ -410,7 +411,6 @@ static void yo22_paint() {
     use_program(ProgTerrainPlan);
     compute();
   } else if (program_counter < PhasePathtraceEnd) {
-    u_progress_trace = (float)(program_counter - PhasePathtraceBegin) / PhasePathtrace_Iter;
     bind_framebuffer(TexFrame);
     if (program_counter == PhasePathtraceBegin) {
       glClearColor(0,0,0,0);

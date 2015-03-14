@@ -2,37 +2,19 @@ uniform float _t, _p, _pt;
 uniform vec2 _r;
 uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
-#if 1
-void main(){
-  //if (gl_FragCoord.y<16.){gl_FragColor=vec4(step(V.x*.5+.5,_p));return;}
-  //gl_FragColor=vec4(texture2D(_P,gl_FragCoord.xy/_r,-20.).w/400.);
-#if 1
-  vec2 uv=floor(gl_FragCoord.xy)/_r;
-  //gl_FragColor=texture2D(_N, uv, -20.);return;
-  vec2 pt=floor(uv*4096.);
-  vec2 pp=floor(uv*128.);
-  vec4 T=texture2D(_T,(pt+vec2(.5))/4096.,-20.);
-  //vec4 P=texture2D(_P,gl_FragCoord.xy/_r,-20.);
-  vec4 P=texture2D(_P,(pp+vec2(.5))/128.,-20.);
-  //vec4 P=texelFetch(_P, ivec2(pp), 0);
-  float dH = P.w - T.z;
-  float dh = T.z - P.z;
-  gl_FragColor=vec4(-dH, -dh, (P.w-P.z)/100., 0.);
-  //gl_FragColor=vec4(texture2D(_P,vec2(.5)/128.,-20.));//vec4(P.r,mod(pp.x+pp.y,2.),0.,0.);
-  //gl_FragColor=vec4(P.r,mod(pp.x+pp.y,2.),0.,0.);
-  //gl_FragColor=vec4(P.r);
-#endif
-  //gl_FragColor = texture2D(_F,gl_FragCoord.xy/_r,-20.)*.4/(1.+256.*_pt);
-}
-#else
-float t=_t*.001;
+
+vec4 noise(vec2 p){return texture2D(_N,(p+.5)/1024.,-20.);}
+vec4 terrain(vec2 p_m){return texture2D(_T,p_m/4096.,-20.);}
+vec4 plan(vec2 p_m){return texture2D(_P,(floor(p_m/32.)+.5)/128.,-20.);}
+
+float t=_t;
 float h(vec2 p){
   vec4 c=texture2D(_T,p/4096.,-20.);
-  return c.z+c.w*10.;
+  return c.z;
   //return c.z;
 }
 float h2(vec2 p){
-  vec4 c=texture2D(_T,p/4096.,-20.);
+  vec4 c=terrain(p);
   //return c.z+c.w;
   return c.z;
 }
@@ -48,21 +30,18 @@ vec3 albedo(vec3 p){
   float m100 = mod(floor(p.x/100.)+floor(p.z/100.),2.);
   float m1000 = mod(floor(p.x/1000.)+floor(p.z/1000.),2.);
   return vec3(m10,m100,m1000)*(.3+.7*mod(floor(p.x)+floor(p.z),2.));
-#elif 1
+#elif 0
   float XZ = mod(floor(p.x/1.)+floor(p.z/1.),2.);
   float Y=mod(floor(p.y),2.);
   return vec3(.2+.5*Y+.3*XZ);
 #else
-  return texture2D(_T,p.xz/4096.,-20.).xyw*10.;
+  vec4 T=terrain(p.xz);
+  return vec3(.2) + vec3(T.x, T.y, T.w);
 #endif
 }
-void main(){
-  if (gl_FragCoord.y<16.){gl_FragColor=vec4(step(V.x*.5+.5,_p));return;}
-  vec2 uv=gl_FragCoord.xy/_r-.5;uv.x*=_r.x/_r.y;
-  vec3 O=vec3(sin(t)*1000.,50.,cos(t)*1000.),D=normalize(vec3(uv,-2.));
-  //for(int i=0;i<16.
+vec4 trace(vec2 uv){
+  vec3 O=vec3(0.,150.,300.),D=normalize(vec3(uv,-2.));
   O.y+=h2(O.xz);
-  //vec3 O=vec3(sin(t)*1000.,600.,cos(t)*1000.),D=normalize(vec3(uv,-2.));
   float l=0.,lp=l;
   for(int i=0;i<128;++i){
     vec3 p=O+D*l;
@@ -81,16 +60,30 @@ void main(){
     l+=d;
     if(l>3000.)break;
   }
-  if(l>3000.){gl_FragColor=vec4(0.);return;}
+  if(l>3000.){return vec4(0.);}
   vec3 p=O+D*l;
-  if (p.y-h(p.xz)>.01*l){gl_FragColor=vec4(1.,0.,0.,1.);return;}
-  if (h(p.xz)>p.y){gl_FragColor=vec4(1.,0.,1.,1.);return;}
-  //gl_FragColor=l/2000.;//vec4((O+D*l).y/1000.);
+  if (p.y-h(p.xz)>.01*l){return vec4(1.,0.,0.,1.);}
+  if (h(p.xz)>p.y){return vec4(1.,0.,1.,1.);}
   vec3 n = n((O+D*l).xz);
-  //vec3 color=vec3(-n.y, n.y, 0.);
   vec3 color=albedo(p)*(max(0.,dot(n, normalize(vec3(1., 1., -.5))))+vec3(.05));
-  //vec3 color=max(0.,dot(n, normalize(vec3(cos(t*10.),1.,sin(t*20.)))))+vec3(.2);
-  //vec3 color = (O+D*l) / vec3(3000.,1000.,3000.);
-  gl_FragColor = vec4(pow(color,vec3(1./2.2)),1.);
+  return vec4(pow(color,vec3(1./2.2)),1.);
 }
+
+void main(){
+  if (gl_FragCoord.y<16.){gl_FragColor=vec4(step(V.x*.5+.5,_p));return;}
+#if 0
+  vec2 uv=floor(gl_FragCoord.xy)/_r;
+  vec2 pt=floor(uv*4096.);
+  vec2 pp=floor(uv*128.);
+  vec4 T=texture2D(_T,(pt+vec2(.5))/4096.,-20.);
+  vec4 P=texture2D(_P,(pp+vec2(.5))/128.,-20.);
+  float dH = P.w - T.z;
+  float dh = T.z - P.z;
+  gl_FragColor=vec4(-dH, -dh, (P.w-P.z)/100., 0.);
+#else
+  if (_pt < .0)
+    gl_FragColor = trace((gl_FragCoord.xy/_r - vec2(.5)) * vec2(_r.x/_r.y,1.));
+  else
+    gl_FragColor = texture2D(_F,gl_FragCoord.xy/_r,-20.)*.2/(1.+256.*_pt);
 #endif
+}

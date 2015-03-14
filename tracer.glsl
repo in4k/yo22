@@ -2,18 +2,16 @@ uniform float _t, _p;
 uniform vec2 _r;
 uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
-
-#define STEPS 128
-#define HIT_EPS .001
-#define FAR 2000.
-#define BOUNCES 6
-
 float t=_t;
 
 vec4 noise(vec2 p){return texture2D(_N,(p+.5)/1024.,-20.);}
-
 vec4 terrain(vec2 p_m){return texture2D(_T,p_m/4096.,-20.);}
 vec4 plan(vec2 p_m){return texture2D(_P,(floor(p_m/32.)+.5)/128.,-20.);}
+
+#define STEPS 128
+#define HIT_EPS .001
+#define FAR 3000.
+#define BOUNCES 6
 
 float h(vec2 p){
   vec4 c=terrain(p);
@@ -34,7 +32,7 @@ vec3 terrain_normal(vec2 p){
 }
 
 vec3 terrain_albedo(vec3 p){
-#if 1
+#if 0
   //return step(80.,terrain(p.xz).z);
   vec4 P=plan(p.xz);
   //return P.g;//(P.w-P.z)/200.;
@@ -42,7 +40,7 @@ vec3 terrain_albedo(vec3 p){
   return 1.-floor(d/5.)/3.;
   //return 1.-step(8., P.w-P.z);
   //return step(100.,P.w);
-#elif 0
+#elif 1
   return vec3(.2);
 #elif 1
   float m10 = mod(floor(p.x/10.)+floor(p.z/10.),2.);
@@ -92,17 +90,17 @@ float dbox(vec3 p,vec3 sz){
 }
 
 float dist_b0(vec3 p){
-  vec3 ofs = vec3(0., 200., -500.);
+  vec3 ofs = vec3(0., 250., -500.);
   return length(p-ofs)-30.;
 }
 
 float dist_b1(vec3 p){
-  vec3 ofs = vec3(0., 130., -500.);
-  return length(p-ofs-vec3(65.,0.,0.))-24.;
+  vec3 ofs = vec3(0., 230., -500.);
+  return length(p-ofs-vec3(85.,0.,0.))-24.;
 }
 float dist_b2(vec3 p){
-  vec3 ofs = vec3(0., 130., -500.);
-  return length(p-ofs+vec3(65.,0.,0.))-20.;
+  vec3 ofs = vec3(0., 230., -500.);
+  return length(p-ofs+vec3(85.,0.,0.))-20.;
 }
 
 float dist_terrain(vec3 p,vec3 D,float dhit){
