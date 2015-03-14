@@ -1,11 +1,28 @@
 uniform float _t, _p, _pt;
 uniform vec2 _r;
-uniform sampler2D _N,_T,_F;
+uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
 #if 1
 void main(){
-  if (gl_FragCoord.y<16.){gl_FragColor=vec4(step(V.x*.5+.5,_p));return;}
-  gl_FragColor = texture2D(_F,gl_FragCoord.xy/_r,-20.)*.1/(1.+256.*_pt);
+  //if (gl_FragCoord.y<16.){gl_FragColor=vec4(step(V.x*.5+.5,_p));return;}
+  //gl_FragColor=vec4(texture2D(_P,gl_FragCoord.xy/_r,-20.).w/400.);
+#if 1
+  vec2 uv=floor(gl_FragCoord.xy)/_r;
+  //gl_FragColor=texture2D(_N, uv, -20.);return;
+  vec2 pt=floor(uv*4096.);
+  vec2 pp=floor(uv*128.);
+  vec4 T=texture2D(_T,(pt+vec2(.5))/4096.,-20.);
+  //vec4 P=texture2D(_P,gl_FragCoord.xy/_r,-20.);
+  vec4 P=texture2D(_P,(pp+vec2(.5))/128.,-20.);
+  //vec4 P=texelFetch(_P, ivec2(pp), 0);
+  float dH = P.w - T.z;
+  float dh = T.z - P.z;
+  gl_FragColor=vec4(-dH, -dh, (P.w-P.z)/100., 0.);
+  //gl_FragColor=vec4(texture2D(_P,vec2(.5)/128.,-20.));//vec4(P.r,mod(pp.x+pp.y,2.),0.,0.);
+  //gl_FragColor=vec4(P.r,mod(pp.x+pp.y,2.),0.,0.);
+  //gl_FragColor=vec4(P.r);
+#endif
+  //gl_FragColor = texture2D(_F,gl_FragCoord.xy/_r,-20.)*.4/(1.+256.*_pt);
 }
 #else
 float t=_t*.001;

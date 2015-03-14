@@ -128,54 +128,46 @@ FUNCLIST FUNCLIST_DBG
 #define CHECK(cond, errmsg)
 #endif
 
+#if 1
 #define WIDTH 1280
 #define HEIGHT 720
+#else
+#define WIDTH 1920
+#define HEIGHT 1080
+#endif
 
-#define NOISE_SIZE 1024
-#define TERRAIN_SIZE 4096
+enum {
+  SizeNoise = 1024,
+  SizeTerrain = 4096,
+  SizePlan = SizeTerrain / 32
+};
 
-#define TERRAIN_ITERATIONS 8/*256*/
-#define TRACE_ITERATIONS 1024
-#define TOTAL_ITERATIONS (TERRAIN_ITERATIONS + TRACE_ITERATIONS)
+enum {
+  PhaseTerrainErosion_Iter = 256,
+  PhasePathtrace_Iter = 1024,
 
-
-
-static unsigned int noise_buffer[NOISE_SIZE * NOISE_SIZE];
-
-static unsigned int prng_state = 5323u;
-
-static unsigned int prng__() {
-  prng_state = (1103515245u * prng_state + 12345u);
-  return prng_state >> 16;
-}
-
-static unsigned int prng() {
-  unsigned int s0 = prng__();
-  unsigned int s1 = prng__();
-  unsigned int s2 = prng__();
-  return (s0 | (s1 << 16)) ^ (s2 << 8);
-}
+  PhaseGenerate = 0,
+  PhaseErodeBegin = PhaseGenerate,
+  PhaseErodeEnd = PhaseErodeBegin + PhaseTerrainErosion_Iter,
+  PhasePlanBegin = PhaseErodeEnd,
+  PhasePlanEnd = PhasePlanBegin + 1,
+  PhasePathtraceBegin = PhasePlanEnd,
+  PhasePathtraceEnd = PhasePathtraceBegin + PhasePathtrace_Iter,
+  PhaseComplete = PhasePathtraceEnd
+};
 
 enum {
   TexNoise8U,
   TexTerrain0, TexTerrain1,
+  TexPlan,
   TexFrame,
   Tex_COUNT
-};
-
-static int tex_widths[Tex_COUNT] = {
-  NOISE_SIZE, TERRAIN_SIZE, TERRAIN_SIZE, WIDTH
-};
-static int tex_heights[Tex_COUNT] = {
-  NOISE_SIZE, TERRAIN_SIZE, TERRAIN_SIZE, HEIGHT
-};
-static void *tex_data[Tex_COUNT] = {
-  noise_buffer, NULL, NULL, NULL
 };
 
 enum {
   ProgTerrainGenerate,
   ProgTerrainErode,
+  ProgTerrainPlan,
   ProgTrace,
   ProgPostprocess,
   Prog_COUNT
@@ -184,22 +176,38 @@ enum {
 #ifndef TOOL
 #include "shaders.h"
 #else
-static const char *fragment_shaders[Prog_COUNT] = {NULL, NULL, NULL, NULL};
+static const char *fragment_shaders[Prog_COUNT] = {NULL, NULL, NULL, NULL, NULL};
 #endif
 
 static const char *vertex_shader_source[] = {"attribute vec4 v;varying vec2 V;void main(){gl_Position=v;V=v.xy;}"};
 /*static char *common_shader_header = 0;*/
 
 static GLuint textures[Tex_COUNT];
+static struct {
+  int w, h;
+} texinfo[Tex_COUNT];
 static GLuint framebuffer;
 static GLuint vertex_shader;
 static GLuint programs[Prog_COUNT];
 static struct {
-  GLint time, progress, progress_erosion, progress_trace, target_res, noise, terrain, frame;
+  GLint time, progress, progress_erosion, progress_trace, target_res, noise, terrain, plan, frame;
 } program_locs[Prog_COUNT];
 static const char *uniform_names[] = {
-  "_t", "_p", "_pe", "_pt", "_r", "_N", "_T", "_F", 0
+  "_t", "_p", "_pe", "_pt", "_r", "_N", "_T", "_P", "_F", 0
 };
+
+static unsigned int noise_buffer[NOISE_SIZE * NOISE_SIZE];
+static unsigned int prng_state = 5323u;
+static unsigned int prng__() {
+  prng_state = (1103515245u * prng_state + 12345u);
+  return prng_state >> 16;
+}
+static unsigned int prng() {
+  unsigned int s0 = prng__();
+  unsigned int s1 = prng__();
+  unsigned int s2 = prng__();
+  return (s0 | (s1 << 16)) ^ (s2 << 8);
+}
 
 static void bind_texture(int index, int sampler) {
   gl.ActiveTexture(GL_TEXTURE0 + sampler);
@@ -210,15 +218,20 @@ static void bind_framebuffer(int target_index) {
   gl.BindFramebuffer(GL_FRAMEBUFFER, framebuffer);
   gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textures[target_index], 0);
   CHECK(GL_FRAMEBUFFER_COMPLETE == gl.CheckFramebufferStatus(GL_FRAMEBUFFER), "framebuffer is not complete");
-  glViewport(0, 0, tex_widths[target_index], tex_heights[target_index]);
+  glViewport(0, 0, texinfo[target_index].w, texinfo[target_index].h);
 }
 
-static GLuint program;
-
 static float u_time = 0, u_progress, u_progress_erosion, u_progress_trace;
-static const int noise_sampler = 0, terrain_sampler = 1, frame_sampler = 2;
 static int width, height;
 
+enum {
+  SamplerBinding_Noise,
+  SamplerBinding_Terrain,
+  SamplerBinding_Plan,
+  SamplerBinding_Frame,
+};
+
+static GLuint program;
 static void use_program(int index) {
   program = programs[index];
   gl.UseProgram(program);
@@ -227,9 +240,10 @@ static void use_program(int index) {
   gl.Uniform1f(program_locs[index].progress_erosion, u_progress_erosion);
   gl.Uniform1f(program_locs[index].progress_trace, u_progress_trace);
   gl.Uniform2f(program_locs[index].target_res, (float)width, (float)height);
-  gl.Uniform1i(program_locs[index].noise, noise_sampler);
-  gl.Uniform1i(program_locs[index].terrain, terrain_sampler);
-  gl.Uniform1i(program_locs[index].frame, frame_sampler);
+  gl.Uniform1i(program_locs[index].noise, SamplerBinding_Noise);
+  gl.Uniform1i(program_locs[index].terrain, SamplerBinding_Terrain);
+  gl.Uniform1i(program_locs[index].plan, SamplerBinding_Plan);
+  gl.Uniform1i(program_locs[index].frame, SamplerBinding_Frame);
 }
 
 static void compute() {
@@ -302,6 +316,18 @@ static GLuint create_and_compile_program(int index) {
   return program;
 }
 
+static void create_texture(int index, int width, int height, int type, void *data) {
+    glBindTexture(GL_TEXTURE_2D, textures[index]);
+    glTexImage2D(GL_TEXTURE_2D, 0, type, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    texinfo[index].w = width;
+    texinfo[index].h = height;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    /*glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);*/
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+}
+
 static void yo22_init() {
   int i;
   
@@ -310,15 +336,11 @@ static void yo22_init() {
 
   glGenTextures(Tex_COUNT, textures);
   gl.GenFramebuffers(1, &framebuffer);
-  for (i = 0; i < Tex_COUNT; ++i) {
-    glBindTexture(GL_TEXTURE_2D, textures[i]);
-    glTexImage2D(GL_TEXTURE_2D, 0, (i==TexNoise8U)?GL_RGBA:GL_RGBA32F,
-        tex_widths[i], tex_heights[i], 0, GL_RGBA, GL_UNSIGNED_BYTE, tex_data[i]);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  }
+  create_texture(TexNoise8U, SizeNoise, SizeNoise, GL_RGBA, noise_buffer);
+  create_texture(TexTerrain0, SizeTerrain, SizeTerrain, GL_RGBA32F, NULL);
+  create_texture(TexTerrain1, SizeTerrain, SizeTerrain, GL_RGBA32F, NULL);
+  create_texture(TexPlan, SizePlan, SizePlan, GL_RGBA32F, NULL);
+  create_texture(TexFrame, WIDTH, HEIGHT, GL_RGBA32F, NULL);
 
   vertex_shader = create_and_compile_shader(GL_VERTEX_SHADER, 1, vertex_shader_source);
   CHECK(vertex_shader != 0, "vertex shader");
@@ -359,36 +381,42 @@ static int program_counter = 0;
 
 static void yo22_paint() {
   u_time += 1;
-  u_progress = (float)program_counter / TOTAL_ITERATIONS;
-  u_progress_erosion = program_counter < TERRAIN_ITERATIONS ? (float)program_counter / TERRAIN_ITERATIONS : 1.f;
-  u_progress_trace = program_counter < TRACE_ITERATIONS ? (float)(program_counter - TERRAIN_ITERATIONS) / (TRACE_ITERATIONS-TERRAIN_ITERATIONS) : 1.f;
+  u_progress = (float)program_counter / PhaseComplete;
 
-  bind_texture(TexNoise8U, noise_sampler);
-  if (program_counter == 0) {
+  bind_texture(TexNoise8U, SamplerBinding_Noise);
+  bind_texture(TexTerrain0, SamplerBinding_Terrain);
+  bind_texture(TexPlan, SamplerBinding_Plan);
+  bind_texture(TexFrame, SamplerBinding_Frame);
+
+  if (program_counter == PhaseGenerate) {
     bind_framebuffer(TexTerrain0);
     use_program(ProgTerrainGenerate);
     compute();
   }
 
-  if (program_counter < TERRAIN_ITERATIONS) {
+  if (program_counter < PhaseErodeEnd) {
+    u_progress_erosion = (float)(program_counter - PhaseErodeBegin) / PhaseTerrainErosion_Iter;
     int j;for(j=0;j<8;++j){
-    bind_framebuffer(TexTerrain1);
-    use_program(ProgTerrainErode);
-    bind_texture(TexTerrain0, terrain_sampler);
+      bind_framebuffer(TexTerrain1);
+      use_program(ProgTerrainErode);
+      bind_texture(TexTerrain0, SamplerBinding_Terrain);
+      compute();
+      bind_framebuffer(TexTerrain0);
+      bind_texture(TexTerrain1, SamplerBinding_Terrain);
+      compute();
+    }
+  } else if (program_counter < PhasePlanEnd) {
+    bind_framebuffer(TexPlan);
+    use_program(ProgTerrainPlan);
     compute();
-    bind_framebuffer(TexTerrain0);
-    bind_texture(TexTerrain1, terrain_sampler);
-    compute();}
-  }
-
-  if (program_counter >= TERRAIN_ITERATIONS && program_counter < TOTAL_ITERATIONS) {
+  } else if (program_counter < PhasePathtraceEnd) {
+    u_progress_trace = (float)(program_counter - PhasePathtraceBegin) / PhasePathtrace_Iter;
     bind_framebuffer(TexFrame);
-    if (program_counter == TERRAIN_ITERATIONS) {
+    if (program_counter == PhasePathtraceBegin) {
       glClearColor(0,0,0,0);
       glClear(GL_COLOR_BUFFER_BIT);
     }
     use_program(ProgTrace);
-    bind_texture(TexTerrain0, terrain_sampler);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     compute();
@@ -398,15 +426,11 @@ static void yo22_paint() {
   gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
   glViewport(0, 0, width, height);
   use_program(ProgPostprocess);
-  bind_texture(TexFrame, frame_sampler);
-  bind_texture(TexTerrain0, terrain_sampler);
   compute();
 
   ++program_counter;
-  if (program_counter >= TOTAL_ITERATIONS)
-    program_counter = TOTAL_ITERATIONS;
-  //else
-  //  fprintf(stderr, "%d%c", program_counter, program_counter%16==15 ? '\n' : ' ');
+  if (program_counter >= PhaseComplete) program_counter = PhaseComplete;
+/*  else fprintf(stderr, "%d%c", program_counter, program_counter%16==15 ? '\n' : ' ');*/
 }
 
 #ifdef PLATFORM_POSIX
@@ -553,11 +577,14 @@ int main(int argc, char *argv[]) {
   files[ProgTerrainErode].filename = "eroder.glsl";/*argv[2];*/
   files[ProgTerrainErode].program_counter = 0;
   files[ProgTerrainErode].watch = -1;
+  files[ProgTerrainPlan].filename = "planner.glsl";/*argv[2];*/
+  files[ProgTerrainPlan].program_counter = PhasePlanBegin;
+  files[ProgTerrainPlan].watch = -1;
   files[ProgTrace].filename = "tracer.glsl";/*argv[3];*/
-  files[ProgTrace].program_counter = TERRAIN_ITERATIONS;
+  files[ProgTrace].program_counter = PhasePathtraceBegin;
   files[ProgTrace].watch = -1;
   files[ProgPostprocess].filename = "postprocessor.glsl"/*argv[4]*/;
-  files[ProgPostprocess].program_counter = TOTAL_ITERATIONS;
+  files[ProgPostprocess].program_counter = PhaseComplete;
   files[ProgPostprocess].watch = -1;
   inotifyfd = inotify_init1(IN_NONBLOCK);
   CHECK(inotifyfd != -1, "inotify_init1");

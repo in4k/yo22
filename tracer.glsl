@@ -1,6 +1,6 @@
 uniform float _t, _p;
 uniform vec2 _r;
-uniform sampler2D _N,_T,_F;
+uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
 
 #define STEPS 128
@@ -12,13 +12,16 @@ float t=_t;
 
 vec4 noise(vec2 p){return texture2D(_N,(p+.5)/1024.,-20.);}
 
+vec4 terrain(vec2 p_m){return texture2D(_T,p_m/4096.,-20.);}
+vec4 plan(vec2 p_m){return texture2D(_P,(floor(p_m/32.)+.5)/128.,-20.);}
+
 float h(vec2 p){
-  vec4 c=texture2D(_T,p/4096.,-20.);
+  vec4 c=terrain(p);
   return c.z;//+c.w*10.;
   //return c.z;
 }
 float h2(vec2 p){
-  vec4 c=texture2D(_T,p/4096.,-20.);
+  vec4 c=terrain(p);
   //return c.z+c.w;
   return c.z;
 }
@@ -32,8 +35,16 @@ vec3 terrain_normal(vec2 p){
 
 vec3 terrain_albedo(vec3 p){
 #if 1
-  return vec3(.2);
+  //return step(80.,terrain(p.xz).z);
+  vec4 P=plan(p.xz);
+  //return P.g;//(P.w-P.z)/200.;
+  float d=P.w-P.z;
+  return 1.-floor(d/5.)/3.;
+  //return 1.-step(8., P.w-P.z);
+  //return step(100.,P.w);
 #elif 0
+  return vec3(.2);
+#elif 1
   float m10 = mod(floor(p.x/10.)+floor(p.z/10.),2.);
   float m100 = mod(floor(p.x/100.)+floor(p.z/100.),2.);
   float m1000 = mod(floor(p.x/1000.)+floor(p.z/1000.),2.);
@@ -95,7 +106,7 @@ float dist_b2(vec3 p){
 }
 
 float dist_terrain(vec3 p,vec3 D,float dhit){
-  float H = h(p.xz);  
+  float H = h(p.xz);
   return p.y-H;
 }
 
@@ -105,8 +116,9 @@ float dist_city(vec3 p, vec3 D, float dhit){
   vec2 cellc = cell*SZ + SZ/2.;
   vec3 cellcenter = vec3(cellc.x, h(cellc), cellc.y);
   vec4 crand = noise(cell);
-  return 
-    dbox(p-cellcenter, vec3((.1+crand.x*.35)*SZ, 1.+crand.y*20., (.05+crand.z*.4)*SZ));
+  crand.y = mix(crand.y, -100., step(.5, crand.w));
+  return 100.;
+//    dbox(p-cellcenter, vec3((.1+crand.x*.35)*SZ, crand.y*20., (.05+crand.z*.4)*SZ));
 }
 
 mat3 geometry_material(vec3 p){
@@ -166,15 +178,15 @@ DEF_TRACE(trace_geometry,geometry_world,64,.01)
 void main(){
   vec2 res=vec2(1280.,720.);
   vec2 uv=gl_FragCoord.xy/res-vec2(.5);uv.x*=res.x/res.y;
-  //vec3 O=vec3(0.,150.,300.),D=normalize(vec3(uv,-2.));
-  vec3 O=vec3(sin(t*.01)*100.,50.,cos(t*.01)*300.),D=normalize(vec3(uv,-2.));
+  vec3 O=vec3(0.,150.,300.),D=normalize(vec3(uv,-2.));
+  //vec3 O=vec3(sin(t*.01)*100.,50.,cos(t*.01)*300.),D=normalize(vec3(uv,-2.));
   //vec3 O=vec3(sin(t)*1000.,50.,cos(t)*1000.),D=normalize(vec3(uv,-2.));
   O.y+=h2(O.xz);
 
   //vec3 O=vec3(0.,0.,10.),D=normalize(vec3(uv,-2.));
 
   // FIXME replace with lens/sampler model
-  O+=noise(vec2(t*1000.)).xyz*.3;
+  //O+=noise(vec2(t*1000.)).xyz*.3;
 
   vec3 color = vec3(0.), cmask=vec3(1.);
   for (int i=0;i<BOUNCES;++i){
@@ -194,7 +206,7 @@ void main(){
       emission = m[1];
 
       vec3 n = geometry_normal(p);
-      O = p;
+      O = p+n*2.*HIT_EPS;
       D = geometry_bounce(
         float(i)/float(BOUNCES)+t+noise(gl_FragCoord.xy).z+noise(1024.*vec2(dot(D,p+t*247.))).w,
         //float(i)/float(BOUNCES)+t*.01,//+p.x+p.y+p.z,
