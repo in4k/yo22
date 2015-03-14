@@ -101,9 +101,6 @@ static struct {
 FUNCLIST FUNCLIST_DBG
 #undef FUNCLIST_DO
 } gl;
-#define FUNCLIST_DO(T,N) ;
-FUNCLIST FUNCLIST_DBG
-#undef FUNCLIST_DO
 
 #if DEBUG
 static void report_n_abort(const char *file, int line, const char *message) {
@@ -113,6 +110,16 @@ static void report_n_abort(const char *file, int line, const char *message) {
   ExitProcess(-1);
 }
 #endif
+#else // not windows
+static struct {
+#define FUNCLIST_DO(T,N) T N;
+FUNCLIST FUNCLIST_DBG
+#undef FUNCLIST_DO
+} gl = {
+#define FUNCLIST_DO(T,N) gl##N,
+FUNCLIST FUNCLIST_DBG
+#undef FUNCLIST_DO
+};
 #endif
 
 #ifdef DEBUG
@@ -137,7 +144,7 @@ static unsigned int noise_buffer[NOISE_SIZE * NOISE_SIZE];
 
 static unsigned int prng_state = 5323u;
 
-static unsigned int prng__() {  
+static unsigned int prng__() {
   prng_state = (1103515245u * prng_state + 12345u);
   return prng_state >> 16;
 }
@@ -755,7 +762,7 @@ int WINAPI WinMain(HINSTANCE a, HINSTANCE b, LPCWSTR c, int d) {
 #else
 void WinMainCRTStartup() {
 #endif
-  HWND w; 
+  HWND w;
   HDC dc;
   RECT r;
   MSG m;
