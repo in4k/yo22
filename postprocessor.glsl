@@ -70,10 +70,10 @@ vec4 trace(vec2 uv){
 }
 
 void main(){
-  vec2 uv=floor(gl_FragCoord.xy);
-  if (uv.y<16.){gl_FragColor=vec4(step(V.x*.5+.5,_p));return;}
+  vec2 fc=floor(gl_FragCoord.xy);
+  vec2 uv=fc/_r;
+  if (fc.y<16.){gl_FragColor=vec4(step(V.x*.5+.5,_p));return;}
 #if 0
-  vec2 uv=floor(gl_FragCoord.xy)/_r;
   vec2 pt=floor(uv*4096.);
   vec2 pp=floor(uv*128.);
   vec4 T=texture2D(_T,(pt+vec2(.5))/4096.,-20.);
@@ -83,12 +83,12 @@ void main(){
   vec4 P=texture2D(_P,(pp+vec2(.5))/128.,-20.);
   float dH = P.w - T.z;
   float dh = T.z - P.z;
-  gl_FragColor=vec4(-dH, -dh, (P.w-P.z)/100., 0.);
+  gl_FragColor=vec4(-dH*1e7, -dh*1e7, (P.w-P.z)/100., 0.);
 #endif
 #else
   if (_pt < .0)
-    gl_FragColor = trace((uv.xy/_r - vec2(.5)) * vec2(_r.x/_r.y,1.));
+    gl_FragColor = trace((uv - vec2(.5)) * vec2(_r.x/_r.y,1.));
   else // FIXME proper scaling
-    gl_FragColor = texture2D(_F,uv.xy/_r,-20.)*.3/(1.+1024.*_pt);
+    gl_FragColor = texture2D(_F,uv,-20.)*.3/(1.+1024.*_pt);
 #endif
 }

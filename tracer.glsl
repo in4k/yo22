@@ -4,16 +4,19 @@ uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
 
 vec4 noise(vec2 p){return texture2D(_N,(p+.5)/1024.,-20.);}
-vec4 terrain(vec2 p_m){return texture2D(_T,p_m/4096.,-20.);}
-vec4 plan(vec2 p_m){return texture2D(_P,(floor(p_m/32.)+.5)/128.,-20.);}
-vec2 fc=floor(gl_FragCoord);
-int rand_state_=fc.y+fc.x*720.+int(_t)*141437;//+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
-vec4 rand(){rand_state_=mod(rand_state_+1,1024*1024);return noise(vec2(float(rand_state_),floor(float(rand_state_)/1024.)));}
+vec4 terrain(vec2 p_m){return texture2D(_T,(p_m+vec2(.5))/4096.,-20.);}
+vec4 plan(vec2 p_m){return texture2D(_P,(floor(p_m/32.)+vec2(.5))/128.,-20.);}
+vec2 fc=floor(gl_FragCoord.xy);
+//int rand_state_=fc.y+fc.x*720.+int(_t)*141437;//+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
+int rand_state_=int(fc.y+fc.x*720.)+int(_t)*1023;//+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
+vec4 rand(){rand_state_=int(mod(float(rand_state_+1),1024.*1024.));return noise(vec2(float(rand_state_),floor(float(rand_state_)/1024.)));}
 
 #define STEPS 128
 #define HIT_EPS .001
 #define FAR 3000.
 #define BOUNCES 3
+#define SKY FAR
+#define GRIDSIZE 32.
 
 vec3 sundir = normalize(vec3(.1,.06,.07));
 
@@ -26,7 +29,7 @@ float h2(vec2 p){
 }
 
 vec3 terrain_normal(vec2 p){
-  vec2 e=vec2(.5,0.);
+  vec2 e=vec2(.5,.0);
   vec3 dx=vec3(2.*e.x,h(p+e.xy)-h(p-e.xy),0.);
   vec3 dz=vec3(0.,h(p+e.yx)-h(p-e.yx),2.*e.x);
   return normalize(cross(dz,dx));
@@ -56,7 +59,7 @@ vec3 terrain_albedo(vec3 p){
   return texture2D(_T,p.xz/4096.,-20.).xyw*10.;
 #endif
 }
-//vec3 terrain_brdf(float s,vec3 p,vec3 n,vec3 inc,vec3 dir){}
+
 vec3 terrain_bounce(float s,vec3 p,vec3 n,vec3 inc){
   vec3 r=noise(vec2(s)).ywx*2.-vec3(1.);
   return normalize(r*sign(dot(r,n)));
@@ -90,137 +93,215 @@ float dbox(vec3 p,vec3 sz){
   return maxv(abs(p)-sz);
 }
 
-float dist_b0(vec3 p){
-  vec3 ofs = vec3(0., 250., -500.);
-  return length(p-ofs)-30.;
-}
-
-float dist_b1(vec3 p){
-  vec3 ofs = vec3(0., 230., -500.);
-  return length(p-ofs-vec3(85.,0.,0.))-24.;
-}
-float dist_b2(vec3 p){
-  vec3 ofs = vec3(0., 230., -500.);
-  return length(p-ofs+vec3(85.,0.,0.))-20.;
-}
-
-float dist_terrain(vec3 p,vec3 D,float dhit){
+float dist_terrain(vec3 p,vec3 D) {
   float H = h(p.xz);
   return p.y-H;
 }
 
-float dist_city(vec3 p, vec3 D, float dhit){
-  float SZ = 32.;
-  vec2 cell = floor(p.xz/SZ);
-  vec2 cellc = cell*SZ + SZ/2.;
+float dist_block(vec3 p, vec4 P) {
+  vec2 cell = floor(p.xz/GRIDSIZE);
+  vec2 cellc = cell*GRIDSIZE + GRIDSIZE/2.;
   vec3 cellcenter = vec3(cellc.x, h(cellc), cellc.y);
   vec4 crand = noise(cell);
   crand.y = mix(crand.y, -100., step(.5, crand.w));
-  return //100.;
-    dbox(p-cellcenter, vec3((.1+crand.x*.35)*SZ*.5, crand.y*50., (.05+crand.z*.4)*SZ*.5));
+  return 100.;
+ //   dbox(p-cellcenter, vec3((.1+crand.x*.35)*GRIDSIZE*.5, crand.y*(P.y-P.z), (.05+crand.z*.4)*GRIDSIZE*.5));
 }
 
-mat3 geometry_material(vec3 p){
-  float terrain = dist_terrain(p,vec3(0.),0.);
-  float bld = dist_city(p,vec3(0.),0.);
-  float b0 = dist_b0(p), b1 = dist_b1(p), b2 = dist_b2(p);
-  float mm = min(min(min(min(terrain,b0),b1),b2),bld);
-
-  mat3 m = mat3(0.,0.,0.,0.,0.,0.,0.,0.,0.);
-  if (mm == bld) {
-    vec2 cell = floor(p.xz/32.);
-    vec4 crand = noise(cell);
-    float ff = mod(p.y/4.,1.);
-    vec3 c = (vec3(ff*.0)+1.*noise(floor(crand.yx*1024.)).wyx);
-    m[0] = c * .9;
-    m[1] = c * 1.2;
-  } else if (mm == b2) {
-    m[0] = vec3(1.);
-    m[1] = vec3(100.,0.,0.);
-  } else if (mm == b1) {
-    m[0] = vec3(1.);
-    m[1] = vec3(0.,100.,0.);
-  } else if (mm == b0) {
-    m[0] = vec3(1.);
-    m[1] = vec3(1000.);
-  } else {
-    m[0] = .6*terrain_albedo(p);
-  }
-
-  return m;
-}
-
-float geometry_world(vec3 p,vec3 D,float dhit){
-  float terrain = dist_terrain(p,D,dhit);
-  float bld = dist_city(p,D,dhit);
-  //return min(min(min(min(terrain,dist_b0(p)),dist_b1(p)),dist_b2(p)),bld);
-  return min(terrain,bld);
-}
-
-float geometry_world_(vec3 p){return geometry_world(p,vec3(0.),.0);}
-
-vec3 geometry_normal(vec3 p){
+vec3 block_normal(vec3 p, vec4 P){
   vec2 e=vec2(.01,.0);
   return normalize(vec3(
-    geometry_world_(p+e.xyy)-geometry_world_(p-e.xyy),
-    geometry_world_(p+e.yxy)-geometry_world_(p-e.yxy),
-    geometry_world_(p+e.yyx)-geometry_world_(p-e.yyx)
+    dist_block(p+e.xyy,P)-dist_block(p-e.xyy,P),
+    dist_block(p+e.yxy,P)-dist_block(p-e.yxy,P),
+    dist_block(p+e.yyx,P)-dist_block(p-e.yyx,P)
     ));
 }
 
-//struct hit_t {vec3 p,i,n;float l,s;};
 //struct material_t {vec3 d,s,e;}
 
-vec3 geometry_bounce(vec3 p,vec3 n,vec3 inc){
+struct hit_t {
+  int mid;
+  float l;
+  vec3 p,i,n;
+  float _gc,_mc;
+};
+
+hit_t hit_block(hit_t h, vec4 P) {
+  h.mid = 2;
+  h.n = block_normal(h.p, P);
+  return h;
+}
+
+hit_t hit_terrain(hit_t h) {
+  h.mid = 1;
+  h.n = terrain_normal(h.p.xz);
+  return h;
+}
+
+#define ASSERT(cond,r,g,b) if(!(cond)){c=vec4(r,g,b,1.);break;}
+
+float minpos(float a, float b) {
+  return (a<0.)?b:((b<0.)?a:min(a,b));
+}
+
+float xp(float o, float d, vec2 p) {
+  if (abs(d) < 1e-6) return 1e6;
+  return ((d>0.) ? (p.y-o) : (p.x-o)) / d + HIT_EPS*2.;
+}
+
+#if 0
+void main() {
+  vec2 res=vec2(1280.,720.);
+  vec2 uv=gl_FragCoord.xy/res-vec2(.5);uv.x*=res.x/res.y;
+  vec3 O=vec3(16.,150.,300.),D=normalize(vec3(uv,-2.));
+  O.y+=h2(O.xz);
+  // FIXME replace with lens/sampler model
+  //O+=noise(vec2(_t)).xyz*vec3(.3,.3,20.);
+  vec3 c = vec3(0.);
+#endif
+hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
+  hit_t h;
+  h.mid = -1;
+  h.l = 0.;
+  h.i = D;
+  h._gc = h._mc = 0.;
+  float dl = 0.;
+  vec4 P=vec4(1e6);
+  for (int i = 0; i < 256; ++i) {
+    if (h.l > Lmax) break;
+    h.p = O + D * h.l;
+    if (dl < HIT_EPS || h.p.y > P.y) {
+      h._gc += 1.;
+      h.l += dl;
+      h.p = O + D * h.l;
+      vec2 cp = floor(h.p.xz/GRIDSIZE)*GRIDSIZE;
+      float dx = xp(h.p.x,D.x,vec2(cp.x,cp.x+GRIDSIZE));
+      float dz = xp(h.p.z,D.z,vec2(cp.y,cp.y+GRIDSIZE));
+      //ASSERT(D.z<0.,0.,1.,0.)
+      //ASSERT(dz > 0.,0.,1.,1.)
+      //ASSERT(dx > 0.,0.,.5,1.)
+      //ASSERT(h.p.z > cp.y,1.,1.,0.)
+      //ASSERT(h.p.z < cp.y+GRIDSIZE,1.,0.,1.)
+      P = plan(h.p.xz);
+      //P(#,B,h,H)
+      float dy = (h.p.y>P.y) ? xp(O.y,D.y,vec2(P.y,SKY)) :
+       ((h.p.y>P.w) ? xp(O.y,D.y,vec2(P.w,P.y)) : xp(O.y,D.y,vec2(P.z,P.w)));
+      //ASSERT(dy > 0.,.5,.5,1.)
+      dl = min(dx,min(dy,dz));
+      //if (dl < 0.) {c=vec3(1.,float(i),h.l);break;}
+    } else {
+      h._mc += 1.;
+      float d = dist_block(h.p, P);
+      if (d < HIT_EPS) return hit_block(h, P);
+      if (h.p.y < P.w)
+      {
+        d = min(d, dist_terrain(h.p, D));
+        if (d < HIT_EPS) return hit_terrain(h);
+      }
+      dl -= d;
+      h.l += d;
+    }
+  }
+  return h;
+//  c = h.l/5000.;
+// gl_FragColor=vec4(c,1.);
+}
+#if 1
+
+struct sinfo_t {
+  vec3 e,a;
+};
+
+sinfo_t solid_brdf(hit_t h, vec3 v) {
+  float df = max(0.,dot(h.n,v));
+  sinfo_t s;s.e=s.a=vec3(0.);
+  switch (h.mid) {
+  case 1:
+    s.e = vec3(0.);
+    s.a = vec3(.5);
+    break;
+  case 2:
+    s.e = vec3(.5);
+    s.a = vec3(1.);
+    break;
+  }
+  s.a *= df;
+  return s;
+}
+
+vec3 solid_bounce(hit_t h){
   vec3 r=rand().zyx*2.-vec3(1.);
-  return normalize(r*sign(dot(r,n)));
+  return normalize(r*sign(dot(r,h.n)));
 }
 
-vec3 brdf(vec3 p, vec3 i, vec3 n, vec3 d){
-  mat3 m = geometry_material(p);
-  return m[0] * max(0.,dot(n,d));
-}
+//vec3 brdf(vec3 p, vec3 i, vec3 n, vec3 d){
+//  mat3 m = geometry_material(p);
+//  return m[0] * max(0.,dot(n,d));
+//}
 
-DEF_TRACE(trace_geometry,geometry_world,64,.01)
+//DEF_TRACE(trace_geometry,geometry_world,64,.01)
 
 vec3 air(vec3 O, vec3 D) {
   return 30. * vec3(1.) * step(.99,dot(D,sundir)) + vec3(.1);
 }
 
+#define MAKE_Q(T) T quantize(T a,T b,int n,T v){return floor(float(n)*(v-a)/(b-a));}
+MAKE_Q(vec3)
+MAKE_Q(float)
+
 void main(){
   vec2 res=vec2(1280.,720.);
   vec2 uv=gl_FragCoord.xy/res-vec2(.5);uv.x*=res.x/res.y;
-  vec3 O=vec3(0.,150.,300.),D=normalize(vec3(uv,-2.));
+  vec3 O=vec3(16.,150.,300.),D=normalize(vec3(uv,-2.));
   //vec3 O=vec3(sin(t*.01)*100.,50.,cos(t*.01)*300.),D=normalize(vec3(uv,-2.));
   //vec3 O=vec3(sin(t)*1000.,50.,cos(t)*1000.),D=normalize(vec3(uv,-2.));
   O.y+=h2(O.xz);
 
   // FIXME replace with lens/sampler model
-  O+=noise(vec2(_t)).xyz*.3;
+  //O+=noise(vec2(_t)).xyz*vec3(.3,.3,20.);
 
-  vec3 color = vec3(0.), cmask=vec3(1.);
-  for (int i=0;i<BOUNCES;++i){
-    if (dot(cmask,cmask) < .001) break;
-    float lg = trace_geometry(O, D, 0., FAR);
+  vec3 color = vec3(0.), transm=vec3(1.);
+#if 1
+  hit_t t = trace_grid(O, D, FAR);
+  //gl_FragColor = vec4(quantize(vec3(0.),vec3(256.),16,vec3(h._gc, h._mc, h._mc+h._gc)), 1.);return;
+  //gl_FragColor = vec4(vec3(quantize(0.,256.,8,h._gc+h._mc)), 1.);return;
+  {
+    float dh=t.p.y-h(t.p.xz);
+    if (dh>HIT_EPS){gl_FragColor=vec4(1.,0.,0.,1.)*100.;return;}
+    if (dh<0.){gl_FragColor=vec4(1.,0.,1.,1.)*100.;return;}
+  }
 
-    if (lg < FAR) {
+  if (t.mid > 0) {
+    color = t.n*4.;
+  } else {
+    //color = h.l/FAR;//air(O, D);
+    //color = air(O, D);
+    color = vec3(1000.,0.,0.);
+  }
+#else
+  for (int i=0;i<1;++i){
+    if (dot(transm,transm) < .001) break;
+    hit_t h = trace_grid(O, D, FAR);
+
+    if (h.mid > 0) {
       //if (p.y-h(p.xz)>HIT_EPS*lt){gl_FragColor=vec4(1.,0.,0.,1.);return;}
       //if (h(p.xz)>p.y){gl_FragColor=vec4(1.,0.,1.,1.);return;}
-      vec3 p=O+D*lg;
-      vec3 n = geometry_normal(p);
-      mat3 m = geometry_material(p);
-      O = p + n * 2. * HIT_EPS;
-      vec3 c = m[1];
+      //mat3 m = geometry_material(p);
+      //vec3 c = m[1];
+      vec3 c = vec3(0.);
+      O = h.p + h.n * 2. * HIT_EPS;
       // importance
-      if (trace_geometry(O, sundir, 0., FAR) >= FAR) c += brdf(O, D, n, sundir) * air(O, sundir);
-      vec3 nD = geometry_bounce(O, n, D);
-      color += cmask * c;
-      cmask *= brdf(O, D, n, nD);
+      if (trace_grid(O, sundir, 100.).l >= 100.) c += solid_brdf(h, sundir).a * air(O, sundir);
+      vec3 nD = solid_bounce(h);
+      color += transm * c;
+      transm *= solid_brdf(h, nD).a;
       D = nD;
     } else {
-      color += cmask * air(O, D);
+      color += transm * air(O, D);
     }
   }
   //color = max(vec3(0.), color);
+#endif
   gl_FragColor = vec4(pow(color,vec3(1./2.2)),1.);
 }
+#endif
