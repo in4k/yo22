@@ -8,17 +8,18 @@ vec4 terrain(vec2 p_m){return texture2D(_T,(p_m-vec2(.5))/4096.,-20.);} // FIXME
 vec4 plan(vec2 p_m){return texture2D(_P,(floor(p_m/32.)+vec2(.5))/128.,-20.);}
 vec2 fc=floor(gl_FragCoord.xy);
 //int rand_state_=fc.y+fc.x*720.+int(_t)*141437;//+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
-int rand_state_=int(fc.y+fc.x*720.)+int(_t)*1023;//+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
+//int rand_state_=int(fc.y*1280.+fc.x)+int(_t)*1023;//+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
+int rand_state_=int(fc.y*1280.+fc.x)+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
 vec4 rand(){rand_state_=int(mod(float(rand_state_+1),1024.*1024.));return noise(vec2(float(rand_state_),floor(float(rand_state_)/1024.)));}
 
 #define STEPS 128
-#define HIT_EPS .001
+#define HIT_EPS .01
 #define FAR 3000.
 #define BOUNCES 3
 #define SKY FAR
 #define GRIDSIZE 32.
 
-vec3 sundir = normalize(vec3(.1,.06,.07));
+vec3 sundir = normalize(vec3(.1,.036,.037));
 
 float h(vec2 p){
   vec4 c=terrain(p);
@@ -226,7 +227,7 @@ sinfo_t solid_brdf(hit_t h, vec3 v) {
   switch (h.mid) {
   case 1:
     s.e = vec3(0.);
-    s.a = vec3(.5);
+    s.a = vec3(.2,.6,.23);
     break;
   case 2:
     s.e = vec3(.5);
@@ -253,6 +254,7 @@ vec3 air(vec3 O, vec3 D) {
   return 30. * vec3(1.) * step(.99,dot(D,sundir)) + vec3(.1);
 }
 
+// DEBUG
 #define MAKE_Q(T) T quantize(T a,T b,int n,T v){return floor(float(n)*(v-a)/(b-a));}
 MAKE_Q(vec3)
 MAKE_Q(float)
@@ -291,7 +293,7 @@ void main(){
     color = vec3(1000.,0.,0.);
   }
 #else
-  for (int i=0;i<1;++i){
+  for (int i=0;i<BOUNCES;++i){
     if (dot(transm,transm) < .001) break;
     hit_t h = trace_grid(O, D, FAR);
   CHECK_ASSERT
@@ -301,8 +303,8 @@ void main(){
       //if (h(p.xz)>p.y){gl_FragColor=vec4(1.,0.,1.,1.);return;}
       //mat3 m = geometry_material(p);
       //vec3 c = m[1];
-      vec3 c = vec3(0.);
-      O = h.p + h.n * 2. * HIT_EPS;
+      vec3 c = vec3(0.) + ((h.mid == 2) ? 100.*noise(floor(h.p.xz/32.)).wyz : 0.);
+      O = h.p + h.n * HIT_EPS * 20.;
       // importance
       if (trace_grid(O, sundir, 100.).l >= 100.) c += solid_brdf(h, sundir).a * air(O, sundir);
       vec3 nD = solid_bounce(h);
