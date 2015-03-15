@@ -4,7 +4,7 @@ uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
 
 vec4 noise(vec2 p){return texture2D(_N,(p+.5)/1024.,-20.);}
-vec4 terrain(vec2 p_m){return texture2D(_T,(p_m+vec2(.5))/4096.,-20.);}
+vec4 terrain(vec2 p_m){return texture2D(_T,(p_m-vec2(.5))/4096.,-20.);} // FIXME why -.5???
 vec4 plan(vec2 p_m){return texture2D(_P,(floor(p_m/32.)+vec2(.5))/128.,-20.);}
 vec2 fc=floor(gl_FragCoord.xy);
 //int rand_state_=fc.y+fc.x*720.+int(_t)*141437;//+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
@@ -29,7 +29,7 @@ float h2(vec2 p){
 }
 
 vec3 terrain_normal(vec2 p){
-  vec2 e=vec2(.5,.0);
+  vec2 e=vec2(1.,.0);
   vec3 dx=vec3(2.*e.x,h(p+e.xy)-h(p-e.xy),0.);
   vec3 dz=vec3(0.,h(p+e.yx)-h(p-e.yx),2.*e.x);
   return normalize(cross(dz,dx));
@@ -104,8 +104,9 @@ float dist_block(vec3 p, vec4 P) {
   vec3 cellcenter = vec3(cellc.x, h(cellc), cellc.y);
   vec4 crand = noise(cell);
   crand.y = mix(crand.y, -100., step(.5, crand.w));
-  return 100.;
- //   dbox(p-cellcenter, vec3((.1+crand.x*.35)*GRIDSIZE*.5, crand.y*(P.y-P.z), (.05+crand.z*.4)*GRIDSIZE*.5));
+  float h = P.y-P.w;
+  //return (h < 1.)?1e6:dbox(p-cellcenter, vec3((.1+crand.x*.35)*GRIDSIZE*.5, crand.y*(P.y-P.z), (.05+crand.z*.4)*GRIDSIZE*.5));
+  return (h < 1.)?1e6:dbox(p-cellcenter, vec3(GRIDSIZE*.15, h, GRIDSIZE*.15));
 }
 
 vec3 block_normal(vec3 p, vec4 P){
@@ -138,7 +139,8 @@ hit_t hit_terrain(hit_t h) {
   return h;
 }
 
-#define ASSERT(cond,r,g,b) if(!(cond)){c=vec4(r,g,b,1.);break;}
+vec4 assertcolor_=vec4(0.);
+#define ASSERT(cond,r,g,b) if(!(cond)){assertcolor_=vec4(r,g,b,1.);}
 
 float minpos(float a, float b) {
   return (a<0.)?b:((b<0.)?a:min(a,b));
@@ -146,7 +148,7 @@ float minpos(float a, float b) {
 
 float xp(float o, float d, vec2 p) {
   if (abs(d) < 1e-6) return 1e6;
-  return ((d>0.) ? (p.y-o) : (p.x-o)) / d + HIT_EPS*2.;
+  return ((d>0.) ? (p.y-o) : (p.x-o)) / d;
 }
 
 #if 0
@@ -164,30 +166,36 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
   h.mid = -1;
   h.l = 0.;
   h.i = D;
-  h._gc = h._mc = 0.;
+  h._gc = h._mc = 0.; // DEBUG
   float dl = 0.;
   vec4 P=vec4(1e6);
-  for (int i = 0; i < 256; ++i) {
+  for (int i = 0; i < STEPS; ++i) {
     if (h.l > Lmax) break;
     h.p = O + D * h.l;
     if (dl < HIT_EPS || h.p.y > P.y) {
       h._gc += 1.;
       h.l += dl;
       h.p = O + D * h.l;
+      // TODO skipsize dependent on D.y
       vec2 cp = floor(h.p.xz/GRIDSIZE)*GRIDSIZE;
       float dx = xp(h.p.x,D.x,vec2(cp.x,cp.x+GRIDSIZE));
       float dz = xp(h.p.z,D.z,vec2(cp.y,cp.y+GRIDSIZE));
-      //ASSERT(D.z<0.,0.,1.,0.)
-      //ASSERT(dz > 0.,0.,1.,1.)
-      //ASSERT(dx > 0.,0.,.5,1.)
-      //ASSERT(h.p.z > cp.y,1.,1.,0.)
-      //ASSERT(h.p.z < cp.y+GRIDSIZE,1.,0.,1.)
+      //ASSERT(dz >= 0.,0.,1.,1.)
+      //ASSERT(dx >= 0.,0.,.5,1.)
+      //ASSERT(h.p.z >= cp.y,1.,1.,0.)
+      //ASSERT(h.p.z <= cp.y+GRIDSIZE,1.,0.,1.)
       P = plan(h.p.xz);
       //P(#,B,h,H)
-      float dy = (h.p.y>P.y) ? xp(O.y,D.y,vec2(P.y,SKY)) :
-       ((h.p.y>P.w) ? xp(O.y,D.y,vec2(P.w,P.y)) : xp(O.y,D.y,vec2(P.z,P.w)));
-      //ASSERT(dy > 0.,.5,.5,1.)
+      float dy =
+        (h.p.y>P.y) ?
+          xp(h.p.y,D.y,vec2(P.y,SKY)) :
+        ((h.p.y>P.w) ?
+          xp(h.p.y,D.y,vec2(P.w,P.y)) :
+          xp(h.p.y,D.y,vec2(P.z,P.w)));
+      //ASSERT(dy >= 0.,.5,.5,1.)
       dl = min(dx,min(dy,dz));
+      //ASSERT(dl >= 0.,.5,.5,.5)
+      dl += HIT_EPS;
       //if (dl < 0.) {c=vec3(1.,float(i),h.l);break;}
     } else {
       h._mc += 1.;
@@ -249,6 +257,8 @@ vec3 air(vec3 O, vec3 D) {
 MAKE_Q(vec3)
 MAKE_Q(float)
 
+#define CHECK_ASSERT if(assertcolor_.a!=0.){gl_FragColor=assertcolor_*1e3;return;}
+
 void main(){
   vec2 res=vec2(1280.,720.);
   vec2 uv=gl_FragCoord.xy/res-vec2(.5);uv.x*=res.x/res.y;
@@ -258,18 +268,20 @@ void main(){
   O.y+=h2(O.xz);
 
   // FIXME replace with lens/sampler model
-  //O+=noise(vec2(_t)).xyz*vec3(.3,.3,20.);
+  O+=noise(vec2(_t)).xyz*vec3(.3,.3,2.);
 
   vec3 color = vec3(0.), transm=vec3(1.);
-#if 1
+#if 0
   hit_t t = trace_grid(O, D, FAR);
-  //gl_FragColor = vec4(quantize(vec3(0.),vec3(256.),16,vec3(h._gc, h._mc, h._mc+h._gc)), 1.);return;
-  //gl_FragColor = vec4(vec3(quantize(0.,256.,8,h._gc+h._mc)), 1.);return;
-  {
-    float dh=t.p.y-h(t.p.xz);
-    if (dh>HIT_EPS){gl_FragColor=vec4(1.,0.,0.,1.)*100.;return;}
-    if (dh<0.){gl_FragColor=vec4(1.,0.,1.,1.)*100.;return;}
-  }
+  CHECK_ASSERT
+  gl_FragColor = vec4(quantize(vec3(0.),vec3(256.),16,vec3(t._gc, t._mc, t._mc+t._gc)), 1.);return;
+  //gl_FragColor = vec4(vec3(quantize(0.,256.,8,t._gc)), 1.);return;
+  //gl_FragColor = vec4(vec3(quantize(0.,256.,8,t._gc+t._mc)), 1.);return;
+  //{
+  //  float dh=t.p.y-h(t.p.xz);
+  //  if (dh>HIT_EPS){gl_FragColor=vec4(1.,0.,0.,1.)*100.;return;}
+  //  if (dh<0.){gl_FragColor=vec4(1.,0.,1.,1.)*100.;return;}
+  //}
 
   if (t.mid > 0) {
     color = t.n*4.;
@@ -282,6 +294,7 @@ void main(){
   for (int i=0;i<1;++i){
     if (dot(transm,transm) < .001) break;
     hit_t h = trace_grid(O, D, FAR);
+  CHECK_ASSERT
 
     if (h.mid > 0) {
       //if (p.y-h(p.xz)>HIT_EPS*lt){gl_FragColor=vec4(1.,0.,0.,1.);return;}

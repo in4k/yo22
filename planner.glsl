@@ -13,6 +13,7 @@ void main(){
       H=max(H,s.z);h=min(h,s.z);
     }
   }
-  //gl_FragColor=vec4(0.,step(20.,h-H)*20. + h,h,H);
-  gl_FragColor=vec4(0.,H,h,H);
+  float d = H - h;
+  gl_FragColor=vec4(0.,H+((d<10.)?20.:0.),h,H);
+  //gl_FragColor=vec4(0.,H,h,H);
 }

@@ -83,7 +83,9 @@ void main(){
   vec4 P=texture2D(_P,(pp+vec2(.5))/128.,-20.);
   float dH = P.w - T.z;
   float dh = T.z - P.z;
-  gl_FragColor=vec4(-dH*1e7, -dh*1e7, (P.w-P.z)/100., 0.);
+  float dHB = P.y - P.w;
+  //gl_FragColor=vec4(-dH*1e7, -dh*1e7, (P.w-P.z)/100., 0.);
+  gl_FragColor=vec4(-dH*1e7, -dh*1e7, dHB, 0.);
 #endif
 #else
   if (_pt < .0)
