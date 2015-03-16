@@ -1,5 +1,7 @@
 uniform float _t,_p;
 uniform vec2 _r;
+uniform vec3 _s;
+uniform mat4 _c;
 uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
 
@@ -19,7 +21,7 @@ vec4 rand(){rand_state_=int(mod(float(rand_state_+1),1024.*1024.));return noise(
 #define SKY FAR
 #define GRIDSIZE 32.
 
-vec3 sundir = normalize(vec3(.1,.036,.037));
+vec3 sundir = normalize(_s);//vec3(.1,.036,.037));
 
 float h(vec2 p){
   vec4 c=terrain(p);
@@ -206,6 +208,15 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
       {
         d = min(d, dist_terrain(h.p, D));
         if (d < HIT_EPS) return hit_terrain(h);
+    // TODO if(d<dhit){
+    //  for (int j=0;j<9;++j){
+    //    float lm=(l+lp)*.5;
+    //    p=O+D*lm;
+    //    d=FUNC_(p,D,dhit);
+    //    if(d<dhit)l=lm;else lp=lm;
+    //  }
+    //  break;
+    // }
       }
       dl -= d;
       h.l += d;
@@ -251,7 +262,7 @@ vec3 solid_bounce(hit_t h){
 //DEF_TRACE(trace_geometry,geometry_world,64,.01)
 
 vec3 air(vec3 O, vec3 D) {
-  return 30. * vec3(1.) * step(.99,dot(D,sundir)) + vec3(.1);
+  return 30. * vec3(1.) * step(.9999,dot(D,sundir)) + vec3(.1);
 }
 
 // DEBUG
@@ -264,7 +275,7 @@ MAKE_Q(float)
 void main(){
   vec2 res=vec2(1280.,720.);
   vec2 uv=gl_FragCoord.xy/res-vec2(.5);uv.x*=res.x/res.y;
-  vec3 O=vec3(16.,150.,300.),D=normalize(vec3(uv,-2.));
+  vec3 O=vec3(16.,190.,300.),D=normalize(vec3(uv,-2.));
   //vec3 O=vec3(sin(t*.01)*100.,50.,cos(t*.01)*300.),D=normalize(vec3(uv,-2.));
   //vec3 O=vec3(sin(t)*1000.,50.,cos(t)*1000.),D=normalize(vec3(uv,-2.));
   O.y+=h2(O.xz);
@@ -303,7 +314,7 @@ void main(){
       //if (h(p.xz)>p.y){gl_FragColor=vec4(1.,0.,1.,1.);return;}
       //mat3 m = geometry_material(p);
       //vec3 c = m[1];
-      vec3 c = vec3(0.) + ((h.mid == 2) ? 100.*noise(floor(h.p.xz/32.)).wyz : 0.);
+      vec3 c = vec3(0.);// + ((h.mid == 2) ? 100.*noise(floor(h.p.xz/32.)).wyz : 0.);
       O = h.p + h.n * HIT_EPS * 20.;
       // importance
       if (trace_grid(O, sundir, 100.).l >= 100.) c += solid_brdf(h, sundir).a * air(O, sundir);

@@ -1,5 +1,6 @@
 uniform float _t, _p, _pt;
 uniform vec2 _r;
+uniform vec3 _s;
 uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
 
@@ -65,7 +66,7 @@ vec4 trace(vec2 uv){
   if (p.y-h(p.xz)>.01*l){return vec4(1.,0.,0.,1.);}
   if (h(p.xz)>p.y){return vec4(1.,0.,1.,1.);}
   vec3 n = n((O+D*l).xz);
-  vec3 color=albedo(p)*(max(0.,dot(n, normalize(vec3(1., 1., -.5))))+vec3(.05));
+  vec3 color=albedo(p)*(max(0.,dot(n, normalize(_s)))+vec3(.05));
   return vec4(pow(color,vec3(1./2.2)),1.);
 }
 

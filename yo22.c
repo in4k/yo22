@@ -17,6 +17,10 @@
 #include <limits.h>
 #include <errno.h>
 
+#ifdef TOOL
+#include <math.h>
+#endif
+
 #ifdef PLATFORM_POSIX
 #include <unistd.h>
 #include <sys/types.h>
@@ -61,6 +65,7 @@
   FUNCLIST_DO(PFNGLUSEPROGRAMPROC, UseProgram) \
   FUNCLIST_DO(PFNGLUNIFORM1FPROC, Uniform1f) \
   FUNCLIST_DO(PFNGLUNIFORM2FPROC, Uniform2f) \
+  FUNCLIST_DO(PFNGLUNIFORM3FPROC, Uniform3f) \
   FUNCLIST_DO(PFNGLUNIFORM1IPROC, Uniform1i) \
   FUNCLIST_DO(PFNGLCREATEPROGRAMPROC, CreateProgram) \
   FUNCLIST_DO(PFNGLATTACHSHADERPROC, AttachShader) \
@@ -190,10 +195,10 @@ static GLuint framebuffer;
 static GLuint vertex_shader;
 static GLuint programs[Prog_COUNT];
 static struct {
-  GLint step, progress, progress_erosion, progress_trace, target_res, noise, terrain, plan, frame;
+  GLint step, progress, progress_erosion, progress_trace, target_res, noise, terrain, plan, frame, sundir, camera;
 } program_locs[Prog_COUNT];
 static const char *uniform_names[] = {
-  "_t", "_p", "_pe", "_pt", "_r", "_N", "_T", "_P", "_F", 0
+  "_t", "_p", "_pe", "_pt", "_r", "_N", "_T", "_P", "_F", "_s", "_c", 0
 };
 
 static unsigned int noise_buffer[SizeNoise * SizeNoise];
@@ -222,6 +227,7 @@ static void bind_framebuffer(int target_index) {
 }
 
 static float u_step = 0, u_progress, u_progress_erosion, u_progress_trace;
+static float u_sundir[3] = { 1., .036, .037 };
 static int width, height;
 
 enum {
@@ -244,6 +250,7 @@ static void use_program(int index) {
   gl.Uniform1i(program_locs[index].terrain, SamplerBinding_Terrain);
   gl.Uniform1i(program_locs[index].plan, SamplerBinding_Plan);
   gl.Uniform1i(program_locs[index].frame, SamplerBinding_Frame);
+  gl.Uniform3f(program_locs[index].sundir, u_sundir[0], u_sundir[1], u_sundir[2]);
 }
 
 static void compute() {
@@ -373,11 +380,23 @@ static void camera_rotate_yaw(float fwd) {
 }
 */
 
+static int program_counter = 0;
+
 static void yo22_size(int w, int h) {
   width = w, height = h;
 }
 
-static int program_counter = 0;
+static void yo22_sundir(float x, float y) {
+  //float sx = sinf(x*3.1415926f), sy = sinf(y*3.1415926f);
+  x = x * 3. - 1.5;
+  y = y * 3. - 1.5;
+  float z = x*x + y*y;
+  u_sundir[0] = x;
+  u_sundir[2] = y;
+  u_sundir[1] = z < 1. ? sqrtf(1.f - z) : -sqrtf(z - 1.f);
+  fprintf(stderr, "sun %f %f %f\n", u_sundir[0], u_sundir[1], u_sundir[2]);
+  if (program_counter > PhasePathtraceBegin) program_counter = PhasePathtraceBegin;
+}
 
 static void yo22_paint() {
   u_step += 1;
@@ -631,7 +650,7 @@ int main(int argc, char *argv[]) {
 
   glXMakeContextCurrent(display, drawable, drawable, context);
 
-  XSelectInput(display, window, StructureNotifyMask | KeyReleaseMask);
+  XSelectInput(display, window, StructureNotifyMask | KeyReleaseMask | ButtonPressMask | ButtonMotionMask);
 
   yo22_init();
 
@@ -642,6 +661,12 @@ int main(int argc, char *argv[]) {
       switch (e.type) {
         case ConfigureNotify:
           yo22_size(e.xconfigure.width, e.xconfigure.height);
+          break;
+
+        case ButtonPress:
+        case MotionNotify:
+          if (e.xbutton.state & Button3Mask)
+            yo22_sundir((float)e.xbutton.x / width, (float)e.xbutton.y / height);
           break;
 
         case KeyRelease:
