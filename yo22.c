@@ -149,8 +149,8 @@ enum {
 };
 
 enum {
-  PhaseTerrainErosion_Iter = 1024,
-  PhasePathtrace_Iter = 1024,
+  PhaseTerrainErosion_Iter = 256,
+  PhasePathtrace_Iter = 256,
 
   PhaseGenerate = 0,
   PhaseErodeBegin = PhaseGenerate,
@@ -249,6 +249,7 @@ void pfv(const char *prefix, const float *f, int N, int l) {
 #endif
 
 #ifdef TOOL
+//static float sqrtf(float f){asm("fld %0;fsqrt;fstp %0;":"+m"(f));return f;}
 static void vadd(float *a, const float *b, float k) {
   a[0] += k*b[0]; a[1] += k*b[1]; a[2] += k*b[2];
 }
@@ -260,16 +261,20 @@ static void vcross(float *out, const float *a, const float *b) {
 static float vdot(const float *a, const float *b) {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
-//static float sqrtf(float f){asm("fld %0;fsqrt;fstp %0;":"+m"(f));return f;}
 static void vnormalize(float *v) {
   float k = 1. / sqrtf(vdot(v,v));
   v[0] *= k; v[1] *= k; v[2] *= k;
 }
-static void camera_set(float px, float py, float pz, float ax, float ay, float az) {
-  u_campos[0] = px; u_campos[1] = py; u_campos[2] = pz;
-  u_cammat[6] = ax; u_cammat[7] = ay; u_cammat[8] = az;
-  u_cammat[3] = 0.f; u_cammat[4] = 1.f; u_cammat[5] = 0.f;
-  vadd(u_cammat+6, u_campos, -1.f);
+static void mmul(float *out, const float *a, const float *b) {
+  int i,j,k;
+  for (i = 0; i < 3; ++i)
+    for (j = 0; j < 3; ++j) {
+      out[i+j*3] = 0;
+      for (k = 0; k < 3; ++k)
+        out[i+j*3] += a[k+j*3] * b[i+k*3];
+    }
+}
+static void camera_update() {
   vnormalize(u_cammat+6);
   vcross(u_cammat+0, u_cammat+3, u_cammat+6);
   vcross(u_cammat+3, u_cammat+6, u_cammat+0);
@@ -277,6 +282,31 @@ static void camera_set(float px, float py, float pz, float ax, float ay, float a
   pfv("CAMMAT", u_cammat, 9, 3);
 #define S(a,b) {float t=u_cammat[a];u_cammat[a]=u_cammat[b];u_cammat[b]=t;}
   S(1,3) S(2,6) S(5,7)
+  if (program_counter > PhasePathtraceBegin) program_counter = PhasePathtraceBegin;
+}
+static void camera_rotate(const float *v, float a) {
+  float c = cosf(a), s = sinf(a);
+  float m[9] = {
+      v[0] * v[0] + (1.f - v[0] * v[0]) * c,
+      v[0] * v[1] * (1.f - c) - v[2] * s,
+      v[0] * v[2] * (1.f - c) + v[1] * s,
+      v[1] * v[0] * (1.f - c) + v[2] * s,
+      v[1] * v[1] + (1.f - v[1] * v[1]) * c,
+      v[1] * v[2] * (1.f - c) - v[0] * s,
+      v[2] * v[0] * (1.f - c) - v[1] * s,
+      v[2] * v[1] * (1.f - c) + v[0] * s,
+      v[2] * v[2] + (1.f - v[2] * v[2]) * c
+  }, cam[9];
+  mmul(cam, u_cammat, m);
+  memcpy(u_cammat, cam, sizeof(cam));
+  camera_update();
+}
+static void camera_set(float px, float py, float pz, float ax, float ay, float az) {
+  u_campos[0] = px; u_campos[1] = py; u_campos[2] = pz;
+  u_cammat[6] = ax; u_cammat[7] = ay; u_cammat[8] = az;
+  u_cammat[3] = 0.f; u_cammat[4] = 1.f; u_cammat[5] = 0.f;
+  vadd(u_cammat+6, u_campos, -1.f);
+  camera_update();
 }
 static void camera_move(float fwd, float right, float up) {
   S(1,3) S(2,6) S(5,7)
@@ -285,11 +315,14 @@ static void camera_move(float fwd, float right, float up) {
   vadd(u_campos, u_cammat+3, up);
   S(1,3) S(2,6) S(5,7)
   if (program_counter > PhasePathtraceBegin) program_counter = PhasePathtraceBegin;
+  pfv("CAMMAT", u_cammat, 9, 3);
 }
-/*static void camera_rotate_pitch(float fwd) {
+static void camera_rotate_pitch(float a) {
+  camera_rotate(u_cammat+0, a);
 }
-static void camera_rotate_yaw(float fwd) {
-}*/
+static void camera_rotate_yaw(float a) {
+  camera_rotate(u_cammat+3, a);
+}
 #endif // TOOL
 
 enum {
@@ -702,6 +735,9 @@ int main(int argc, char *argv[]) {
   //struct timeval st;
   //clock_gettime(CLOCK_MONOTONIC, &st);
 
+  int mx, my;
+  float spd = 10.;
+
   for (;;) {
     while (XPending(display)) {
       XEvent e;
@@ -713,9 +749,15 @@ int main(int argc, char *argv[]) {
           break;
 
         case ButtonPress:
+          mx = e.xmotion.x; my = e.xmotion.y;
         case MotionNotify:
           if (e.xbutton.state & Button3Mask)
             yo22_sundir((float)e.xbutton.x / width, (float)e.xbutton.y / height);
+          if (e.xbutton.state & Button1Mask) {
+            camera_rotate_yaw((e.xbutton.x - mx) * .01f);
+            camera_rotate_pitch((my - e.xbutton.y) * .01f);
+            mx = e.xmotion.x; my = e.xmotion.y;
+          }
           break;
 
         case KeyPress:
@@ -730,6 +772,8 @@ int main(int argc, char *argv[]) {
               case XK_a:go_right-=p;break;
               case XK_space:go_up+=p;break;
               case XK_c:go_up-=p;break;
+              case 65505: if (p>0) spd = 100.; else spd = 10.;
+              default: fprintf(stderr, "%d ", k);
             }
             if (k != XK_Escape)
               break;
@@ -744,7 +788,7 @@ int main(int argc, char *argv[]) {
     monitor_changes();
 
     if (go_forward | go_right | go_up)
-      camera_move((float)go_forward*5., (float)go_right*5., (float)go_up*5.);
+      camera_move((float)go_forward*spd, (float)go_right*spd, (float)go_up*spd);
 
     yo22_paint();
     glXSwapBuffers(display, drawable);
