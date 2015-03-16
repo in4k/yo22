@@ -13,9 +13,9 @@ float fbm(vec2 v,float s) {
   return r;
 }
 float
-Kr = 0.17,
-Ke = 0.035,
-Ks = 0.2;
+Kr = 0.27,
+Ke = 0.005,
+Ks = 0.8;
 vec2 uv=floor(gl_FragCoord.xy);
 float transfer(float H,float w,vec2 ofs){
   vec4 c=texture2D(_T,(uv+ofs+vec2(.5))/4096.,-20.);
@@ -52,7 +52,7 @@ void main(){
   // 3. rain
   float sa=sin(_t*373.4111),ca=cos(_t*373.4111);
   mat2 m=mat2(sa,ca,ca,-sa);
-  dw=Kr*n4((uv+vec2(_t*123.24,317.1141*_t))*m)*(0==mod(floor(_t/3.),12.)?1.:0.);
+  dw=Kr*n4((uv+vec2(_t*123.24,317.1141*_t))*m)*(0==mod(floor(_t/3.),12.)?.1:.0);
   //dw=Kr*n4((uv+vec2(_t*123.24,317.1141*_t))*m)*(0==mod(floor(_t/3.),12.)?1.:0.);
   c.z-=dw*Ks;
   c.w+=dw;

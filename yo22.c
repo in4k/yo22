@@ -149,7 +149,7 @@ enum {
 };
 
 enum {
-  PhaseTerrainErosion_Iter = 256,
+  PhaseTerrainErosion_Iter = 1024,
   PhasePathtrace_Iter = 256,
 
   PhaseGenerate = 0,
@@ -228,9 +228,13 @@ static void bind_framebuffer(int target_index) {
 }
 
 static float u_step = 0, u_progress, u_progress_erosion, u_progress_trace;
-static float u_sundir[3] = { 0.610647, 0.644115, -0.460680 };
-static float u_campos[3] = { 100., 100., 100. };
-static float u_cammat[9];
+static float u_sundir[3] = { -.3672, .4572, .81 };
+static float u_campos[3] = { 951.679565, 599.804443, 4472.438965 };
+static float u_cammat[9] = {
+  0.761736, -0.200912, -0.615949,
+  -0.000000, 0.950703, -0.310104,
+  0.647888, 0.236217, 0.724184
+};
 static int width, height;
 
 static int program_counter = 0;
@@ -241,7 +245,7 @@ void pfv(const char *prefix, const float *f, int N, int l) {
   fprintf(stderr, "%s:\n", prefix);
   for (i = 0; i < N; ++i) {
     if (i % l == 0) fprintf(stderr, "\t");
-    fprintf(stderr, "%f%s", f[i], (i%l == l-1||i==N-1)?"\n":", ");
+    fprintf(stderr, "%f,%s", f[i], (i%l == l-1||i==N-1)?"\n":" ");
   }
 }
 #else
@@ -301,13 +305,14 @@ static void camera_rotate(const float *v, float a) {
   memcpy(u_cammat, cam, sizeof(cam));
   camera_update();
 }
+/*
 static void camera_set(float px, float py, float pz, float ax, float ay, float az) {
   u_campos[0] = px; u_campos[1] = py; u_campos[2] = pz;
   u_cammat[6] = ax; u_cammat[7] = ay; u_cammat[8] = az;
   u_cammat[3] = 0.f; u_cammat[4] = 1.f; u_cammat[5] = 0.f;
   vadd(u_cammat+6, u_campos, -1.f);
   camera_update();
-}
+}*/
 static void camera_move(float fwd, float right, float up) {
   S(1,3) S(2,6) S(5,7)
   vadd(u_campos, u_cammat+6, fwd);
@@ -315,7 +320,7 @@ static void camera_move(float fwd, float right, float up) {
   vadd(u_campos, u_cammat+3, up);
   S(1,3) S(2,6) S(5,7)
   if (program_counter > PhasePathtraceBegin) program_counter = PhasePathtraceBegin;
-  pfv("CAMMAT", u_cammat, 9, 3);
+  pfv("CAMPOS", u_campos, 3, 3);
 }
 static void camera_rotate_pitch(float a) {
   camera_rotate(u_cammat+0, a);
@@ -434,13 +439,6 @@ static void create_texture(int index, int width, int height, int type, void *dat
 
 static void yo22_init() {
   int i;
-
-  camera_set(1., 0., 0., 0., 0., 0.);
-  camera_set(-1., 0., 0., 0., 0., 0.);
-  camera_set(0., 0., 1., 0., 0., 0.);
-  camera_set(0., 0., -1., 0., 0., 0.);
-  camera_set(1., 1., 1., 0., 0., 0.);
-  camera_set(400., 800., 400., 0., 0., 0.);
   
   for (i = 0; i < SizeNoise * SizeNoise; ++i)
     noise_buffer[i] = prng();
