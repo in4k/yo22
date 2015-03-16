@@ -66,6 +66,7 @@
   FUNCLIST_DO(PFNGLUNIFORM1FPROC, Uniform1f) \
   FUNCLIST_DO(PFNGLUNIFORM2FPROC, Uniform2f) \
   FUNCLIST_DO(PFNGLUNIFORM3FPROC, Uniform3f) \
+  FUNCLIST_DO(PFNGLUNIFORMMATRIX3FVPROC, UniformMatrix3fv) \
   FUNCLIST_DO(PFNGLUNIFORM1IPROC, Uniform1i) \
   FUNCLIST_DO(PFNGLCREATEPROGRAMPROC, CreateProgram) \
   FUNCLIST_DO(PFNGLATTACHSHADERPROC, AttachShader) \
@@ -195,10 +196,10 @@ static GLuint framebuffer;
 static GLuint vertex_shader;
 static GLuint programs[Prog_COUNT];
 static struct {
-  GLint step, progress, progress_erosion, progress_trace, target_res, noise, terrain, plan, frame, sundir, camera;
+  GLint step, progress, progress_erosion, progress_trace, target_res, noise, terrain, plan, frame, sundir, campos, cammat;
 } program_locs[Prog_COUNT];
 static const char *uniform_names[] = {
-  "_t", "_p", "_pe", "_pt", "_r", "_N", "_T", "_P", "_F", "_s", "_c", 0
+  "_t", "_p", "_pe", "_pt", "_r", "_N", "_T", "_P", "_F", "_s", "_cp", "_cm", 0
 };
 
 static unsigned int noise_buffer[SizeNoise * SizeNoise];
@@ -227,8 +228,69 @@ static void bind_framebuffer(int target_index) {
 }
 
 static float u_step = 0, u_progress, u_progress_erosion, u_progress_trace;
-static float u_sundir[3] = { 1., .036, .037 };
+static float u_sundir[3] = { 0.610647, 0.644115, -0.460680 };
+static float u_campos[3] = { 100., 100., 100. };
+static float u_cammat[9];
 static int width, height;
+
+static int program_counter = 0;
+
+#if DEBUG
+void pfv(const char *prefix, const float *f, int N, int l) {
+  int i;
+  fprintf(stderr, "%s:\n", prefix);
+  for (i = 0; i < N; ++i) {
+    if (i % l == 0) fprintf(stderr, "\t");
+    fprintf(stderr, "%f%s", f[i], (i%l == l-1||i==N-1)?"\n":", ");
+  }
+}
+#else
+#define pfv(...)
+#endif
+
+#ifdef TOOL
+static void vadd(float *a, const float *b, float k) {
+  a[0] += k*b[0]; a[1] += k*b[1]; a[2] += k*b[2];
+}
+static void vcross(float *out, const float *a, const float *b) {
+  out[0] = a[1] * b[2] - a[2] * b[1];
+  out[1] = a[2] * b[0] - a[0] * b[2];
+  out[2] = a[0] * b[1] - a[1] * b[0];
+}
+static float vdot(const float *a, const float *b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+//static float sqrtf(float f){asm("fld %0;fsqrt;fstp %0;":"+m"(f));return f;}
+static void vnormalize(float *v) {
+  float k = 1. / sqrtf(vdot(v,v));
+  v[0] *= k; v[1] *= k; v[2] *= k;
+}
+static void camera_set(float px, float py, float pz, float ax, float ay, float az) {
+  u_campos[0] = px; u_campos[1] = py; u_campos[2] = pz;
+  u_cammat[6] = ax; u_cammat[7] = ay; u_cammat[8] = az;
+  u_cammat[3] = 0.f; u_cammat[4] = 1.f; u_cammat[5] = 0.f;
+  vadd(u_cammat+6, u_campos, -1.f);
+  vnormalize(u_cammat+6);
+  vcross(u_cammat+0, u_cammat+3, u_cammat+6);
+  vcross(u_cammat+3, u_cammat+6, u_cammat+0);
+  vnormalize(u_cammat+3);
+  pfv("CAMMAT", u_cammat, 9, 3);
+#define S(a,b) {float t=u_cammat[a];u_cammat[a]=u_cammat[b];u_cammat[b]=t;}
+  S(1,3) S(2,6) S(5,7)
+}
+static void camera_move(float fwd, float right, float up) {
+  S(1,3) S(2,6) S(5,7)
+  vadd(u_campos, u_cammat+6, fwd);
+  vadd(u_campos, u_cammat+0, right);
+  vadd(u_campos, u_cammat+3, up);
+  S(1,3) S(2,6) S(5,7)
+  if (program_counter > PhasePathtraceBegin) program_counter = PhasePathtraceBegin;
+}
+/*static void camera_rotate_pitch(float fwd) {
+}
+static void camera_rotate_yaw(float fwd) {
+}*/
+#endif // TOOL
 
 enum {
   SamplerBinding_Noise,
@@ -251,6 +313,8 @@ static void use_program(int index) {
   gl.Uniform1i(program_locs[index].plan, SamplerBinding_Plan);
   gl.Uniform1i(program_locs[index].frame, SamplerBinding_Frame);
   gl.Uniform3f(program_locs[index].sundir, u_sundir[0], u_sundir[1], u_sundir[2]);
+  gl.Uniform3f(program_locs[index].campos, u_campos[0], u_campos[1], u_campos[2]);
+  gl.UniformMatrix3fv(program_locs[index].cammat, 1, GL_FALSE, u_cammat);
 }
 
 static void compute() {
@@ -337,6 +401,13 @@ static void create_texture(int index, int width, int height, int type, void *dat
 
 static void yo22_init() {
   int i;
+
+  camera_set(1., 0., 0., 0., 0., 0.);
+  camera_set(-1., 0., 0., 0., 0., 0.);
+  camera_set(0., 0., 1., 0., 0., 0.);
+  camera_set(0., 0., -1., 0., 0., 0.);
+  camera_set(1., 1., 1., 0., 0., 0.);
+  camera_set(400., 800., 400., 0., 0., 0.);
   
   for (i = 0; i < SizeNoise * SizeNoise; ++i)
     noise_buffer[i] = prng();
@@ -355,33 +426,6 @@ static void yo22_init() {
     create_and_compile_program(i);
 }
 
-/*
-static float camera[16];
-static void cross(const float *a, const float *b, float *out) {
-  out[0] = a[1] * b[2] - a[2] * b[1];
-  out[1] = a[2] * b[0] - a[0] * b[2];
-  out[2] = a[0] * b[1] - a[1] * b[0];
-}
-static float dot(const float *a, const float *b) {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-static float sqrtf(float f){asm("fld %0;fsqrt;fstp %0;":"+m"(f));return f;}
-static void normalize(float *v) {
-  float k = 1. / sqrtf(dot(v,v));
-  v[0] *= k; v[1] *= k; v[2] *= k;
-}
-static void camera_set(float px, float py, float pz, float ax, float ay, float az) {
-}
-static void camera_move(float fwd, float right, float up) {
-}
-static void camera_rotate_pitch(float fwd) {
-}
-static void camera_rotate_yaw(float fwd) {
-}
-*/
-
-static int program_counter = 0;
-
 static void yo22_size(int w, int h) {
   width = w, height = h;
 }
@@ -394,7 +438,7 @@ static void yo22_sundir(float x, float y) {
   u_sundir[0] = x;
   u_sundir[2] = y;
   u_sundir[1] = z < 1. ? sqrtf(1.f - z) : -sqrtf(z - 1.f);
-  fprintf(stderr, "sun %f %f %f\n", u_sundir[0], u_sundir[1], u_sundir[2]);
+  fprintf(stderr, "sun %f, %f, %f\n", u_sundir[0], u_sundir[1], u_sundir[2]);
   if (program_counter > PhasePathtraceBegin) program_counter = PhasePathtraceBegin;
 }
 
@@ -650,13 +694,18 @@ int main(int argc, char *argv[]) {
 
   glXMakeContextCurrent(display, drawable, drawable, context);
 
-  XSelectInput(display, window, StructureNotifyMask | KeyReleaseMask | ButtonPressMask | ButtonMotionMask);
+  XSelectInput(display, window, StructureNotifyMask | KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonMotionMask);
 
   yo22_init();
+
+  int go_forward = 0, go_right = 0, go_up = 0;
+  //struct timeval st;
+  //clock_gettime(CLOCK_MONOTONIC, &st);
 
   for (;;) {
     while (XPending(display)) {
       XEvent e;
+      int p = -1;
       XNextEvent(display, &e);
       switch (e.type) {
         case ConfigureNotify:
@@ -669,9 +718,22 @@ int main(int argc, char *argv[]) {
             yo22_sundir((float)e.xbutton.x / width, (float)e.xbutton.y / height);
           break;
 
+        case KeyPress:
+          p += 2;
         case KeyRelease:
-          if (XLookupKeysym(&e.xkey, 0) != XK_Escape)
-            break;
+          {
+            int k = XLookupKeysym(&e.xkey, 0);
+            switch (k) {
+              case XK_w:go_forward+=p;break;
+              case XK_s:go_forward-=p;break;
+              case XK_d:go_right+=p;break;
+              case XK_a:go_right-=p;break;
+              case XK_space:go_up+=p;break;
+              case XK_c:go_up-=p;break;
+            }
+            if (k != XK_Escape)
+              break;
+          }
         case ClientMessage:
         case DestroyNotify:
         case UnmapNotify:
@@ -680,6 +742,9 @@ int main(int argc, char *argv[]) {
     }
 
     monitor_changes();
+
+    if (go_forward | go_right | go_up)
+      camera_move((float)go_forward*5., (float)go_right*5., (float)go_up*5.);
 
     yo22_paint();
     glXSwapBuffers(display, drawable);

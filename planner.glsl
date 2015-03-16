@@ -3,8 +3,11 @@ uniform vec2 _r;
 uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
 
+vec4 n4(vec2 p){return texture2D(_N,(p+vec2(.5))/1024.,-20.);}
+
 void main(){
-  vec2 p=floor(gl_FragCoord.xy)*32.+vec2(.5);
+  vec2 fc=floor(gl_FragCoord.xy);
+  vec2 p = fc*32.+vec2(.5);
   float h=1e6,H=0.;
   for(int x=0;x<32;++x){
     for(int y=0;y<32;++y){
@@ -14,6 +17,7 @@ void main(){
     }
   }
   float d = H - h;
-  gl_FragColor=vec4(0.,H+((d<10.)?20.:0.),h,H);
+  float pop = pow(smoothstep(26.,8.,d),4.);
+  gl_FragColor=vec4(n4(fc).y,max(0.,pop*50.)+H,h,H);
   //gl_FragColor=vec4(0.,H,h,H);
 }

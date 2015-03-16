@@ -1,6 +1,7 @@
 uniform float _t, _p, _pt;
 uniform vec2 _r;
-uniform vec3 _s;
+uniform vec3 _s,_cp;
+uniform mat3 _cm;
 uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
 
@@ -41,8 +42,8 @@ vec3 albedo(vec3 p){
 #endif
 }
 vec4 trace(vec2 uv){
-  vec3 O=vec3(0.,150.,300.),D=normalize(vec3(uv,-2.));
-  O.y+=h2(O.xz);
+  vec3 O=_cp,D=normalize(vec3(uv,2.))*_cm;
+  O.y = max(O.y, h2(O.xz)+10.);
   float l=0.,lp=l;
   for(int i=0;i<128;++i){
     vec3 p=O+D*l;

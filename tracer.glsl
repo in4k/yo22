@@ -1,17 +1,17 @@
 uniform float _t,_p;
 uniform vec2 _r;
-uniform vec3 _s;
-uniform mat4 _c;
+uniform vec3 _s,_cp;
+uniform mat3 _cm;
 uniform sampler2D _N,_T,_P,_F;
 varying vec2 V;
 
 vec4 noise(vec2 p){return texture2D(_N,(p+.5)/1024.,-20.);}
-vec4 terrain(vec2 p_m){return texture2D(_T,(p_m-vec2(.5))/4096.,-20.);} // FIXME why -.5???
+vec4 terrain(vec2 p_m){return texture2D(_T,(p_m+vec2(.5,.5))/4096.,-20.);} // FIXME why -.5???
 vec4 plan(vec2 p_m){return texture2D(_P,(floor(p_m/32.)+vec2(.5))/128.,-20.);}
 vec2 fc=floor(gl_FragCoord.xy);
 //int rand_state_=fc.y+fc.x*720.+int(_t)*141437;//+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
 //int rand_state_=int(fc.y*1280.+fc.x)+int(_t)*1023;//+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
-int rand_state_=int(fc.y*1280.+fc.x)+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
+int rand_state_=int(fc.y*1280.+fc.x)+int(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256;
 vec4 rand(){rand_state_=int(mod(float(rand_state_+1),1024.*1024.));return noise(vec2(float(rand_state_),floor(float(rand_state_)/1024.)));}
 
 #define STEPS 128
@@ -109,7 +109,7 @@ float dist_block(vec3 p, vec4 P) {
   crand.y = mix(crand.y, -100., step(.5, crand.w));
   float h = P.y-P.w;
   //return (h < 1.)?1e6:dbox(p-cellcenter, vec3((.1+crand.x*.35)*GRIDSIZE*.5, crand.y*(P.y-P.z), (.05+crand.z*.4)*GRIDSIZE*.5));
-  return (h < 1.)?1e6:dbox(p-cellcenter, vec3(GRIDSIZE*.15, h, GRIDSIZE*.15));
+  return (h < 10.)?1e6:dbox(p-cellcenter, vec3(GRIDSIZE*(.05+.3*crand.x), h*(.4+.6*crand.y), GRIDSIZE*(.05+.3*crand.z)));
 }
 
 vec3 block_normal(vec3 p, vec4 P){
@@ -122,6 +122,11 @@ vec3 block_normal(vec3 p, vec4 P){
 }
 
 //struct material_t {vec3 d,s,e;}
+
+struct cell_t {
+  float B,H,h;
+  vec3 m,M;
+};
 
 struct hit_t {
   int mid;
@@ -154,16 +159,6 @@ float xp(float o, float d, vec2 p) {
   return ((d>0.) ? (p.y-o) : (p.x-o)) / d;
 }
 
-#if 0
-void main() {
-  vec2 res=vec2(1280.,720.);
-  vec2 uv=gl_FragCoord.xy/res-vec2(.5);uv.x*=res.x/res.y;
-  vec3 O=vec3(16.,150.,300.),D=normalize(vec3(uv,-2.));
-  O.y+=h2(O.xz);
-  // FIXME replace with lens/sampler model
-  //O+=noise(vec2(_t)).xyz*vec3(.3,.3,20.);
-  vec3 c = vec3(0.);
-#endif
 hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
   hit_t h;
   h.mid = -1;
@@ -192,7 +187,7 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
       float dy =
         (h.p.y>P.y) ?
           xp(h.p.y,D.y,vec2(P.y,SKY)) :
-        ((h.p.y>P.w) ?
+        ((h.p.y>P.w) ?// && (P.y-P.w) > 0.) ?
           xp(h.p.y,D.y,vec2(P.w,P.y)) :
           xp(h.p.y,D.y,vec2(P.z,P.w)));
       //ASSERT(dy >= 0.,.5,.5,1.)
@@ -218,16 +213,15 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
     //  break;
     // }
       }
+      d = min(d,dl);
       dl -= d;
       h.l += d;
     }
   }
   return h;
-//  c = h.l/5000.;
-// gl_FragColor=vec4(c,1.);
 }
-#if 1
 
+#if 1
 struct sinfo_t {
   vec3 e,a;
 };
@@ -275,13 +269,16 @@ MAKE_Q(float)
 void main(){
   vec2 res=vec2(1280.,720.);
   vec2 uv=gl_FragCoord.xy/res-vec2(.5);uv.x*=res.x/res.y;
-  vec3 O=vec3(16.,190.,300.),D=normalize(vec3(uv,-2.));
+  //vec3 O=vec3(16.,190.,300.),D=normalize(vec3(uv,-2.));
   //vec3 O=vec3(sin(t*.01)*100.,50.,cos(t*.01)*300.),D=normalize(vec3(uv,-2.));
   //vec3 O=vec3(sin(t)*1000.,50.,cos(t)*1000.),D=normalize(vec3(uv,-2.));
-  O.y+=h2(O.xz);
+  //O.y+=h2(O.xz);
+
+  vec3 O=_cp,D=normalize(vec3(uv,2.))*_cm;
+  O.y = max(O.y, h2(O.xz)+10.);
 
   // FIXME replace with lens/sampler model
-  O+=noise(vec2(_t)).xyz*vec3(.3,.3,2.);
+  O+=noise(vec2(_t)).xyz*vec3(.3,.3,.3);
 
   vec3 color = vec3(0.), transm=vec3(1.);
 #if 0
