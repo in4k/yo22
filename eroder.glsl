@@ -52,7 +52,7 @@ void main(){
   // 3. rain
   float sa=sin(_t*373.4111),ca=cos(_t*373.4111);
   mat2 m=mat2(sa,ca,ca,-sa);
-  dw=Kr*n4((uv+vec2(_t*123.24,317.1141*_t))*m)*(0==mod(floor(_t/3.),12.)?.1:.0);
+  dw=Kr*n4((uv+vec2(_t*123.24,317.1141*_t))*m).x*(0==mod(floor(_t/3.),12.)?.1:.0);
   //dw=Kr*n4((uv+vec2(_t*123.24,317.1141*_t))*m)*(0==mod(floor(_t/3.),12.)?1.:0.);
   c.z-=dw*Ks;
   c.w+=dw;

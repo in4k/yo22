@@ -14,7 +14,7 @@ vec2 fc=floor(gl_FragCoord.xy);
 int rand_state_=int(fc.y*1280.+fc.x)+int(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256;
 vec4 rand(){rand_state_=int(mod(float(rand_state_+1),1024.*1024.));return noise(vec2(float(rand_state_),floor(float(rand_state_)/1024.)));}
 
-#define STEPS 128
+#define STEPS (128*2)
 #define HIT_EPS .01
 #define FAR 3000.
 #define BOUNCES 3
@@ -229,15 +229,16 @@ struct sinfo_t {
 sinfo_t solid_brdf(hit_t h, vec3 v) {
   float df = max(0.,dot(h.n,v));
   sinfo_t s;s.e=s.a=vec3(0.);
-  switch (h.mid) {
-  case 1:
+  if(h.mid == 1) {
     s.e = vec3(0.);
     s.a = vec3(.2,.6,.23);
-    break;
-  case 2:
-    s.e = vec3(.5);
-    s.a = vec3(1.);
-    break;
+  } else if (h.mid == 2) {
+    s.e = vec3(.0);
+    s.a = vec3(1.) * (
+      mod(floor(h.p.x),3.)*
+      mod(floor(h.p.y),3.)*
+      mod(floor(h.p.z),3.)
+      ==0.?.4:1.);
   }
   s.a *= df;
   return s;
@@ -248,15 +249,14 @@ vec3 solid_bounce(hit_t h){
   return normalize(r*sign(dot(r,h.n)));
 }
 
-//vec3 brdf(vec3 p, vec3 i, vec3 n, vec3 d){
-//  mat3 m = geometry_material(p);
-//  return m[0] * max(0.,dot(n,d));
-//}
-
-//DEF_TRACE(trace_geometry,geometry_world,64,.01)
-
 vec3 air(vec3 O, vec3 D) {
-  return 30. * vec3(1.) * step(.9999,dot(D,sundir)) + vec3(.1);
+  return 30. * vec3(1.) * smoothstep(.999,.9999,dot(D,sundir))
+    + pow(
+    //vec3(135., 206., 235.)/255.
+    vec3(0., 191., 255.)/255.
+    //vec3(128., 218., 235.)/255.
+    , vec3(2.2));
+
 }
 
 // DEBUG
