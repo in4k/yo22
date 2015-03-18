@@ -16,7 +16,7 @@ vec4 rand(){rand_state_=int(mod(float(rand_state_+1),1024.*1024.));return noise(
 
 #define STEPS (128*2)
 #define EPS .01
-#define FAR 4000.
+#define FAR 5000.
 #define BOUNCES 3
 #define SKY FAR
 #define GRIDSIZE 32.
@@ -110,7 +110,6 @@ cell_t cell_identify(vec3 p) {
 float dist_block(vec3 p, cell_t c) {
   vec4 crand = noise(c.i);
   crand.y = mix(crand.y, -100., step(.5, crand.w));
-  //return (h < 1.)?1e6:dbox(p-cellcenter, vec3((.1+crand.x*.35)*GRIDSIZE*.5, crand.y*(P.y-P.z), (.05+crand.z*.4)*GRIDSIZE*.5));
   return (c.Bh < 10.)?1e6:dbox(p-c.c, vec3(GRIDSIZE*(.05+.3*crand.x), c.Bh*(.4+.6*crand.y), GRIDSIZE*(.05+.3*crand.z)));
 }
 
@@ -167,7 +166,7 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
     if (h.l > Lmax) break;
     float de = EPS * h.l * 1e-2;
     h.p = O + D * h.l;
-    if (dl < 0 || h.p.y > c.B) {
+    if (dl < 0. || h.p.y > c.B) {
       h._gc += 1.;
       h.l += max(0.,dl) + EPS;
       h.p = O + D * h.l;
@@ -217,28 +216,43 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
   return h;
 }
 
-#if 1
-struct sinfo_t {
-  vec3 e,a;
+struct mat_t {
+  vec3 e, Cd, Cs;
+  float s;
 };
 
-sinfo_t solid_brdf(hit_t h, vec3 v) {
-  float df = max(0.,dot(h.n,v));
-  sinfo_t s;s.e=s.a=vec3(0.);
+mat_t material(hit_t h) {
+  mat_t m;
+  m.e = vec3(1., 0., 1.);
+  m.Cd = vec3(0.);
+  m.Cs = vec3(0.);
+  m.s = 0.;
+
   if(h.mid == 1) {
-    s.e = vec3(0.);
-    s.a = vec3(.2,.6,.23);
-    if (h.p.y < H(h.p.xz)) s.a = vec3(1.,0.,0.);
-  } else if (h.mid == 2) {
-    s.e = vec3(.0);
-    s.a = vec3(1.) * (
-      mod(floor(h.p.x),3.)*
-      mod(floor(h.p.y),3.)*
-      mod(floor(h.p.z),3.)
-      ==0.?.4:1.);
+    m.e = vec3(0.);
+    m.Cd = vec3(.2,.6,.23);
+    if (h.p.y < H(h.p.xz)) m.e = vec3(1.,0.,0.);
+  } else
+  if (h.mid == 2) {
+    m.e = vec3(0.);
+    vec3 wn=floor(h.p);
+    if (mod(wn,vec3(3.)) == vec3(0.)) {
+      m.e = 10. * (vec3(.6) + .2 * (noise(wn.yz).wzy+noise(wn.xx).xwz)) * step(1.1, noise(wn.xy).x + noise(wn.zz).z);
+    }
+    m.Cd = vec3(1.);
   }
-  s.a *= df;
-  return s;
+  return m;
+}
+
+vec3 brdf(hit_t h, mat_t m, vec3 wi) {
+  vec3 wo=-h.i,wh=normalize(wi+wo);
+  float ci=max(0.,dot(h.n,wi)),co=max(0.,dot(h.n,wo)),ch=dot(wi,wh);
+  //return m.Cd * ci;
+  return // diffuse
+    .3875077 * m.Cd * (vec3(1.) - m.Cs) * (1. - pow(1.-.5*ci,5.)) * (1. - pow(1.-.5*co,5.))
+    + // specular
+    .0015831 * (m.s + 4.) * pow(dot(h.n, wh), m.s) * (m.Cs + pow(1. - ch, 5.) * (vec3(1.) - m.Cs)) / max(1e-3, ch * max(ci, co))
+;
 }
 
 vec3 solid_bounce(hit_t h){
@@ -305,17 +319,18 @@ void main(){
   CHECK_ASSERT
 
     if (h.mid > 0) {
+      mat_t m = material(h);
       //if (p.y-H(p.xz)>EPS*lt){gl_FragColor=vec4(1.,0.,0.,1.);return;}
       //if (H(p.xz)>p.y){gl_FragColor=vec4(1.,0.,1.,1.);return;}
       //mat3 m = geometry_material(p);
       //vec3 c = m[1];
-      vec3 c = vec3(0.);// + ((h.mid == 2) ? 100.*noise(floor(h.p.xz/32.)).wyz : 0.);
-      O = h.p + h.n * EPS * 2.;
+      vec3 c = m.e;
+      O = h.p + h.n * EPS;
       // importance
-      if (trace_grid(O, sundir, 100.).l >= 100.) c += solid_brdf(h, sundir).a * air(O, sundir);
+      if (trace_grid(O, sundir, 100.).l >= 100.) c += brdf(h, m, sundir) * air(O, sundir);
       vec3 nD = solid_bounce(h);
       color += transm * c;
-      transm *= solid_brdf(h, nD).a;
+      transm *= brdf(h, m, nD);
       D = nD;
       Lmax *= .6;
     } else {
@@ -326,4 +341,3 @@ void main(){
 #endif
   gl_FragColor = vec4(pow(color,vec3(1./2.2)),1.);
 }
-#endif
