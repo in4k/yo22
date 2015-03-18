@@ -15,7 +15,7 @@ int rand_state_=int(fc.y*1280.+fc.x)+int(noise(vec2(_t,0.)).x*256.+noise(vec2(0.
 vec4 rand(){rand_state_=int(mod(float(rand_state_+1),1024.*1024.));return noise(vec2(float(rand_state_),floor(float(rand_state_)/1024.)));}
 
 #define STEPS (128*2)
-#define HIT_EPS .01
+#define EPS .01
 #define FAR 4000.
 #define BOUNCES 3
 #define SKY FAR
@@ -126,8 +126,8 @@ vec3 block_normal(vec3 p, cell_t c){
 struct hit_t {
   int mid;
   float l;
-  vec3 p,i,n;
-  float _gc,_mc;
+  vec3 p, i, n;
+  float _gc, _mc; // DEBUG
 };
 
 hit_t hit_block(hit_t h, cell_t c) {
@@ -165,10 +165,11 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
   float pl = h.l;
   for (int i = 0; i < STEPS; ++i) {
     if (h.l > Lmax) break;
+    float de = EPS * h.l * 1e-2;
     h.p = O + D * h.l;
     if (dl < 0 || h.p.y > c.B) {
       h._gc += 1.;
-      h.l += max(0.,dl) + HIT_EPS;
+      h.l += max(0.,dl) + EPS;
       h.p = O + D * h.l;
       c = cell_identify(h.p);
       //P(#,B,h,H)
@@ -190,24 +191,24 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
       //ASSERT(dy >= 0.,.5,.5,1.)
       dl = min(dx,min(dy,dz));
       //ASSERT(dl >= 0.,.5,.5,.5)
-      dl += HIT_EPS;
+      dl += EPS;
       //if (dl < 0.) {c=vec3(1.,float(i),h.l);break;}
     } else
     //h._mc -= 1.;}
     {
       h._mc += 1.;
       float d = dist_block(h.p, c);
-      if (d < HIT_EPS) return hit_block(h, c);
+      if (d < de) return hit_block(h, c);
       if (h.p.y < c.H)
       {
         d = min(d, dist_terrain(h.p, D));
-        if (d < HIT_EPS) {
-          h.l = bin_terrain(O, D, HIT_EPS, pl, h.l);
+        if (d < de) {
+          h.l = bin_terrain(O, D, de, pl, h.l);
           h.p = O + D * h.l;
           return hit_terrain(h);
         }
       }
-      d = min(d,dl+HIT_EPS);
+      d = min(d,dl+EPS);
       dl -= d;
       pl = h.l;
       h.l += d;
@@ -285,7 +286,7 @@ void main(){
   //gl_FragColor = vec4(vec3(quantize(0.,256.,8,t._gc+t._mc)), 1.);return;
   //{
   //  float dh=t.p.y-H(t.p.xz);
-  //  if (dh>HIT_EPS){gl_FragColor=vec4(1.,0.,0.,1.)*100.;return;}
+  //  if (dh>EPS){gl_FragColor=vec4(1.,0.,0.,1.)*100.;return;}
   //  if (dh<0.){gl_FragColor=vec4(1.,0.,1.,1.)*100.;return;}
   //}
 
@@ -297,24 +298,26 @@ void main(){
     color = vec3(1000.,0.,0.);
   }
 #else
+  float Lmax = FAR;
   for (int i=0;i<BOUNCES;++i){
     if (dot(transm,transm) < .001) break;
-    hit_t h = trace_grid(O, D, FAR);
+    hit_t h = trace_grid(O, D, Lmax);
   CHECK_ASSERT
 
     if (h.mid > 0) {
-      //if (p.y-H(p.xz)>HIT_EPS*lt){gl_FragColor=vec4(1.,0.,0.,1.);return;}
+      //if (p.y-H(p.xz)>EPS*lt){gl_FragColor=vec4(1.,0.,0.,1.);return;}
       //if (H(p.xz)>p.y){gl_FragColor=vec4(1.,0.,1.,1.);return;}
       //mat3 m = geometry_material(p);
       //vec3 c = m[1];
       vec3 c = vec3(0.);// + ((h.mid == 2) ? 100.*noise(floor(h.p.xz/32.)).wyz : 0.);
-      O = h.p + h.n * HIT_EPS * 2.;
+      O = h.p + h.n * EPS * 2.;
       // importance
       if (trace_grid(O, sundir, 100.).l >= 100.) c += solid_brdf(h, sundir).a * air(O, sundir);
       vec3 nD = solid_bounce(h);
       color += transm * c;
       transm *= solid_brdf(h, nD).a;
       D = nD;
+      Lmax *= .6;
     } else {
       color += transm * air(O, D);
     }
