@@ -23,7 +23,7 @@ vec4 rand(){rand_state_=int(mod(float(rand_state_+1),1024.*1024.));return noise(
 
 vec3 sundir = normalize(_s);//vec3(.1,.036,.037));
 
-float h(vec2 p){
+float H(vec2 p){
   vec4 c=terrain(p);
   return c.z;}
 float h2(vec2 p){
@@ -33,8 +33,8 @@ float h2(vec2 p){
 
 vec3 terrain_normal(vec2 p){
   vec2 e=vec2(1.,.0);
-  vec3 dx=vec3(2.*e.x,h(p+e.xy)-h(p-e.xy),0.);
-  vec3 dz=vec3(0.,h(p+e.yx)-h(p-e.yx),2.*e.x);
+  vec3 dx=vec3(2.*e.x,H(p+e.xy)-H(p-e.xy),0.);
+  vec3 dz=vec3(0.,H(p+e.yx)-H(p-e.yx),2.*e.x);
   return normalize(cross(dz,dx));//+1.5*noise(p*134.241));
 }
 
@@ -68,38 +68,26 @@ vec3 terrain_bounce(float s,vec3 p,vec3 n,vec3 inc){
   return normalize(r*sign(dot(r,n)));
 }
 
-#define DEF_TRACE(NAME_,FUNC_,STEPS_,HIT_EPS_) \
-float NAME_(vec3 O, vec3 D, float l, float lM){\
-  float lp=l;\
-  for(int i=0;i<STEPS_;++i){\
-    vec3 p=O+D*l;\
-    float dhit=HIT_EPS*l;\
-    float d=FUNC_(p,D,dhit);\
-    if(d<dhit){\
-      for (int j=0;j<9;++j){\
-        float lm=(l+lp)*.5;\
-        p=O+D*lm;\
-        d=FUNC_(p,D,dhit);\
-        if(d<dhit)l=lm;else lp=lm;\
-      }\
-      break;\
-    }\
-    lp=l;\
-    l+=d;\
-    if(l>lM)return lM;\
-  }\
-  return l;\
-}
-
 float maxv(vec3 v){return max(v.x,max(v.y,v.z));}
 float dbox(vec3 p,vec3 sz){
   return maxv(abs(p)-sz);
 }
 
 float dist_terrain(vec3 p,vec3 D) {
-  float H = h(p.xz);
-  return p.y-H;
+  float H = H(p.xz);
+  return (p.y - H);
 }
+
+
+#define MAKE_BINSEARCH(NAME_,DISTF_,STEPS_,ARG_) \
+float NAME_(vec3 O, vec3 D, float e, float lo, float li){\
+  for(int i = 0; i < STEPS_; ++i) {\
+    float lm = (lo + li) * .5;\
+    if (DISTF_(O + D * lm, ARG_) < e) li = lm; else lo = lm;\
+  }\
+  return lo;\
+}
+MAKE_BINSEARCH(bin_terrain, dist_terrain, 8, D)
 
 struct cell_t {
   vec2 i;
@@ -161,9 +149,9 @@ float minpos(float a, float b) {
   return (a<0.)?b:((b<0.)?a:min(a,b));
 }
 
-float xp(float o, float d, vec2 p) {
+float xp(float o, float d, float m, float M) {
   if (abs(d) < 1e-6) return 1e6;
-  return ((d>0.) ? (p.y-o) : (p.x-o)) / d;
+  return ((d>0.) ? (M-o) : (m-o)) / d;
 }
 
 hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
@@ -173,54 +161,55 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
   h.i = D;
   h._gc = h._mc = 0.; // DEBUG
   float dl = 0.;
-  cell_t c; c.B = 1e6;
+  cell_t c;
+  float pl = h.l;
   for (int i = 0; i < STEPS; ++i) {
     if (h.l > Lmax) break;
     h.p = O + D * h.l;
-    if (dl < HIT_EPS || h.p.y > c.B) {
+    if (dl < 0 || h.p.y > c.B) {
       h._gc += 1.;
-      h.l += dl;
+      h.l += max(0.,dl) + HIT_EPS;
       h.p = O + D * h.l;
       c = cell_identify(h.p);
       //P(#,B,h,H)
       // TODO skipsize dependent on D.y
-      float dx = xp(h.p.x, D.x, vec2(c.m.x, c.m.x + GRIDSIZE));
-      float dz = xp(h.p.z, D.z, vec2(c.m.z, c.m.z + GRIDSIZE));
+      //float dx = xp(h.p.x, D.x, c.m.x - GRIDSIZE, c.m.x + GRIDSIZE);
+      //float dz = xp(h.p.z, D.z, c.m.z - GRIDSIZE, c.m.z + GRIDSIZE);
+      float dx = xp(h.p.x, D.x, c.m.x, c.m.x + GRIDSIZE);
+      float dz = xp(h.p.z, D.z, c.m.z, c.m.z + GRIDSIZE);
       //ASSERT(dz >= 0.,0.,1.,1.)
       //ASSERT(dx >= 0.,0.,.5,1.)
       //ASSERT(h.p.z >= cp.y,1.,1.,0.)
       //ASSERT(h.p.z <= cp.y+GRIDSIZE,1.,0.,1.)
       float dy =
         (h.p.y > c.B) ?
-          xp(h.p.y, D.y, vec2(c.B, SKY)) :
+          xp(h.p.y, D.y, c.B, SKY) :
         ((h.p.y > c.H) ?// && (P.y-P.w) > 0.) ?
-          xp(h.p.y, D.y, vec2(c.H, c.B)) :
-          xp(h.p.y, D.y, vec2(c.h, c.H)));
+          xp(h.p.y, D.y, c.H, c.B) :
+          1e6);//xp(h.p.y, D.y, c.h, c.H));
       //ASSERT(dy >= 0.,.5,.5,1.)
       dl = min(dx,min(dy,dz));
       //ASSERT(dl >= 0.,.5,.5,.5)
       dl += HIT_EPS;
       //if (dl < 0.) {c=vec3(1.,float(i),h.l);break;}
-    } else {
+    } else
+    //h._mc -= 1.;}
+    {
       h._mc += 1.;
       float d = dist_block(h.p, c);
       if (d < HIT_EPS) return hit_block(h, c);
-      if (h.p.y < c.B)
+      if (h.p.y < c.H)
       {
         d = min(d, dist_terrain(h.p, D));
-        if (d < HIT_EPS) return hit_terrain(h);
-    // TODO if(d<dhit){
-    //  for (int j=0;j<9;++j){
-    //    float lm=(l+lp)*.5;
-    //    p=O+D*lm;
-    //    d=FUNC_(p,D,dhit);
-    //    if(d<dhit)l=lm;else lp=lm;
-    //  }
-    //  break;
-    // }
+        if (d < HIT_EPS) {
+          h.l = bin_terrain(O, D, HIT_EPS, pl, h.l);
+          h.p = O + D * h.l;
+          return hit_terrain(h);
+        }
       }
-      d = min(d,dl);
+      d = min(d,dl+HIT_EPS);
       dl -= d;
+      pl = h.l;
       h.l += d;
     }
   }
@@ -238,6 +227,7 @@ sinfo_t solid_brdf(hit_t h, vec3 v) {
   if(h.mid == 1) {
     s.e = vec3(0.);
     s.a = vec3(.2,.6,.23);
+    if (h.p.y < H(h.p.xz)) s.a = vec3(1.,0.,0.);
   } else if (h.mid == 2) {
     s.e = vec3(.0);
     s.a = vec3(1.) * (
@@ -290,11 +280,11 @@ void main(){
 #if 0
   hit_t t = trace_grid(O, D, FAR);
   CHECK_ASSERT
-  gl_FragColor = vec4(quantize(vec3(0.),vec3(256.),16,vec3(t._gc, t._mc, t._mc+t._gc)), 1.);return;
+  gl_FragColor = vec4(quantize(vec3(0.),vec3(256.),8,vec3(t._gc, t._mc, t._mc+t._gc)), 1.);return;
   //gl_FragColor = vec4(vec3(quantize(0.,256.,8,t._gc)), 1.);return;
   //gl_FragColor = vec4(vec3(quantize(0.,256.,8,t._gc+t._mc)), 1.);return;
   //{
-  //  float dh=t.p.y-h(t.p.xz);
+  //  float dh=t.p.y-H(t.p.xz);
   //  if (dh>HIT_EPS){gl_FragColor=vec4(1.,0.,0.,1.)*100.;return;}
   //  if (dh<0.){gl_FragColor=vec4(1.,0.,1.,1.)*100.;return;}
   //}
@@ -313,12 +303,12 @@ void main(){
   CHECK_ASSERT
 
     if (h.mid > 0) {
-      //if (p.y-h(p.xz)>HIT_EPS*lt){gl_FragColor=vec4(1.,0.,0.,1.);return;}
-      //if (h(p.xz)>p.y){gl_FragColor=vec4(1.,0.,1.,1.);return;}
+      //if (p.y-H(p.xz)>HIT_EPS*lt){gl_FragColor=vec4(1.,0.,0.,1.);return;}
+      //if (H(p.xz)>p.y){gl_FragColor=vec4(1.,0.,1.,1.);return;}
       //mat3 m = geometry_material(p);
       //vec3 c = m[1];
       vec3 c = vec3(0.);// + ((h.mid == 2) ? 100.*noise(floor(h.p.xz/32.)).wyz : 0.);
-      O = h.p + h.n * HIT_EPS * 20.;
+      O = h.p + h.n * HIT_EPS * 2.;
       // importance
       if (trace_grid(O, sundir, 100.).l >= 100.) c += solid_brdf(h, sundir).a * air(O, sundir);
       vec3 nD = solid_bounce(h);
