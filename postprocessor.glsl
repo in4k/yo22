@@ -93,6 +93,6 @@ void main(){
   if (_pt < .0)
     gl_FragColor = trace((uv - vec2(.5)) * vec2(_r.x/_r.y,1.));
   else // FIXME proper scaling
-    gl_FragColor = texture2D(_F,uv,-20.)*.6/(1.+63.*_pt);
+    gl_FragColor = pow(texture2D(_F,uv,-20.)*.3/(1.+63.*_pt),vec4(1./2.2));
 #endif
 }

@@ -17,7 +17,7 @@ void main(){
     }
   }
   float d = H - h;
-  float pop = pow(smoothstep(26.,8.,d),4.);
-  gl_FragColor=vec4(n4(fc).y,max(0.,pop*50.)+H,h,H);
+  float pop = pow(smoothstep(17.,0.,d),4.)*smoothstep(200.,110.,H);
+  gl_FragColor=vec4(n4(fc).y,max(0.,pop*120.)+H,h,H);
   //gl_FragColor=vec4(0.,H,h,H);
 }

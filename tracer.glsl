@@ -13,6 +13,17 @@ vec2 fc=floor(gl_FragCoord.xy);
 //int rand_state_=int(fc.y*1280.+fc.x)+int(_t)*1023;//+(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256.;
 int rand_state_=int(fc.y*1280.+fc.x)+int(noise(vec2(_t,0.)).x*256.+noise(vec2(0.,_t)).z)*256;
 vec4 rand(){rand_state_=int(mod(float(rand_state_+1),1024.*1024.));return noise(vec2(float(rand_state_),floor(float(rand_state_)/1024.)));}
+vec4 n4(vec2 v){return texture2D(_N,(v+vec2(.5))/256.,-20.);}
+float n(vec2 v){return n4(v).w;}
+float vn(vec2 v,vec2 m) {
+  vec2 e=vec2(1.,0.),V=floor(v);v=fract(v);v*=v*(3.-2.*v);
+  return mix(mix(n(mod(v+e.yy,m)),n(mod(v+e.xy,m)),v.x),mix(n(mod(v+e.yx,m)),n(mod(v+e.xx,m)),v.x),v.y);
+}
+float fbm(vec2 v,float s) {
+  float r=0.,k=.5;
+  for(int i=0;i<4;++i,k*=.5,s*=2.)r+=k*vn(v*s,vec2(s));
+  return r;
+}
 
 #define STEPS (128*2)
 #define EPS .01
@@ -63,11 +74,6 @@ vec3 terrain_albedo(vec3 p){
 #endif
 }
 
-vec3 terrain_bounce(float s,vec3 p,vec3 n,vec3 inc){
-  vec3 r=noise(vec2(s)).ywx*2.-vec3(1.);
-  return normalize(r*sign(dot(r,n)));
-}
-
 float maxv(vec3 v){return max(v.x,max(v.y,v.z));}
 float dbox(vec3 p,vec3 sz){
   return maxv(abs(p)-sz);
@@ -91,7 +97,8 @@ MAKE_BINSEARCH(bin_terrain, dist_terrain, 8, D)
 
 struct cell_t {
   vec2 i;
-  vec3 c,m,M;
+  vec3 c,m,M,BB;
+  vec4 S;
   float B,H,h,p,Bh;
 };
 
@@ -104,13 +111,28 @@ cell_t cell_identify(vec3 p) {
   c.m.y = c.h;
   c.M = c.m + vec3(GRIDSIZE, c.B, GRIDSIZE);
   c.c = c.m + vec3(GRIDSIZE, c.H-c.h, GRIDSIZE) * .5;
+  c.S = noise(c.i+vec2(23.,17.)).wyzx;
+  c.BB = vec3(GRIDSIZE*.5-4., c.Bh, GRIDSIZE*.5-4.);
   return c;
 }
 
+float bd1(vec3 p, cell_t c) {
+  float d = 1e6;
+  vec3 S = vec3(GRIDSIZE*.5-4., c.Bh, GRIDSIZE*.5-4.)*7.;
+  S.xz *= .6 + .4*c.S.yw;
+  for (int i = 0; i < 4; ++i) {
+    vec4 r = .5 * (c.S + noise(vec2(c.S.w, float(i))));
+    //vec3 s = vec3(GRIDSIZE*(.05+.3*S.x), c.Bh*(.4+.6*S.y), GRIDSIZE*(.05+.3*S.z));
+    d = min(d, dbox(p, S));
+    S *= r.wyz;
+  }
+  return d;
+}
+
 float dist_block(vec3 p, cell_t c) {
-  vec4 crand = noise(c.i);
-  crand.y = mix(crand.y, -100., step(.5, crand.w));
-  return (c.Bh < 10.)?1e6:dbox(p-c.c, vec3(GRIDSIZE*(.05+.3*crand.x), c.Bh*(.4+.6*crand.y), GRIDSIZE*(.05+.3*crand.z)));
+  p -= c.c; // p is now in cell-space
+  float d = (c.Bh < 10.) ? 1e6 : bd1(p, c);
+  return max(d, dbox(p, c.BB));
 }
 
 vec3 block_normal(vec3 p, cell_t c){
@@ -126,17 +148,18 @@ struct hit_t {
   int mid;
   float l;
   vec3 p, i, n;
+  cell_t c;
   float _gc, _mc; // DEBUG
 };
 
-hit_t hit_block(hit_t h, cell_t c) {
+hit_t hit_block(hit_t h) {
   h.mid = 2;
-  h.n = block_normal(h.p, c);
+  h.n = block_normal(h.p, h.c);
   return h;
 }
 
 hit_t hit_terrain(hit_t h) {
-  h.mid = 1;
+  h.mid = (h.c.Bh > 10.) ? 3 : 1;
   h.n = terrain_normal(h.p.xz);
   return h;
 }
@@ -160,33 +183,31 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
   h.i = D;
   h._gc = h._mc = 0.; // DEBUG
   float dl = 0.;
-  cell_t c;
   float pl = h.l;
   for (int i = 0; i < STEPS; ++i) {
     if (h.l > Lmax) break;
-    float de = EPS * h.l * 1e-2;
+    float de = EPS * h.l * 2e-2;
     h.p = O + D * h.l;
-    if (dl < 0. || h.p.y > c.B) {
+    if (dl < 0. || h.p.y > h.c.B) {
       h._gc += 1.;
       h.l += max(0.,dl) + EPS;
       h.p = O + D * h.l;
-      c = cell_identify(h.p);
-      //P(#,B,h,H)
+      h.c = cell_identify(h.p);
       // TODO skipsize dependent on D.y
-      //float dx = xp(h.p.x, D.x, c.m.x - GRIDSIZE, c.m.x + GRIDSIZE);
-      //float dz = xp(h.p.z, D.z, c.m.z - GRIDSIZE, c.m.z + GRIDSIZE);
-      float dx = xp(h.p.x, D.x, c.m.x, c.m.x + GRIDSIZE);
-      float dz = xp(h.p.z, D.z, c.m.z, c.m.z + GRIDSIZE);
+      //float dx = xp(h.p.x, D.x, h.c.m.x - GRIDSIZE, h.c.m.x + GRIDSIZE);
+      //float dz = xp(h.p.z, D.z, h.c.m.z - GRIDSIZE, h.c.m.z + GRIDSIZE);
+      float dx = xp(h.p.x, D.x, h.c.m.x, h.c.m.x + GRIDSIZE);
+      float dz = xp(h.p.z, D.z, h.c.m.z, h.c.m.z + GRIDSIZE);
       //ASSERT(dz >= 0.,0.,1.,1.)
       //ASSERT(dx >= 0.,0.,.5,1.)
       //ASSERT(h.p.z >= cp.y,1.,1.,0.)
       //ASSERT(h.p.z <= cp.y+GRIDSIZE,1.,0.,1.)
       float dy =
-        (h.p.y > c.B) ?
-          xp(h.p.y, D.y, c.B, SKY) :
-        ((h.p.y > c.H) ?// && (P.y-P.w) > 0.) ?
-          xp(h.p.y, D.y, c.H, c.B) :
-          1e6);//xp(h.p.y, D.y, c.h, c.H));
+        (h.p.y > h.c.B) ?
+          xp(h.p.y, D.y, h.c.B, SKY) :
+        ((h.p.y > h.c.H) ?// && (P.y-P.w) > 0.) ?
+          xp(h.p.y, D.y, h.c.H, h.c.B) :
+          1e6);//xp(h.p.y, D.y, h.c.h, h.c.H));
       //ASSERT(dy >= 0.,.5,.5,1.)
       dl = min(dx,min(dy,dz));
       //ASSERT(dl >= 0.,.5,.5,.5)
@@ -196,9 +217,9 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
     //h._mc -= 1.;}
     {
       h._mc += 1.;
-      float d = dist_block(h.p, c);
-      if (d < de) return hit_block(h, c);
-      if (h.p.y < c.H)
+      float d = dist_block(h.p, h.c);
+      if (d < de) return hit_block(h);
+      if (h.p.y < h.c.H)
       {
         d = min(d, dist_terrain(h.p, D));
         if (d < de) {
@@ -221,6 +242,10 @@ struct mat_t {
   float s;
 };
 
+vec3 mg(vec2 p) {
+  return vec3(.2,.6,.23) + .2 * (noise(p*.2).xxx-vec3(.5));
+}
+
 mat_t material(hit_t h) {
   mat_t m;
   m.e = vec3(1., 0., 1.);
@@ -230,9 +255,9 @@ mat_t material(hit_t h) {
 
   if(h.mid == 1) {
     m.e = vec3(0.);
-    m.Cd = vec3(.2,.6,.23);
-    if (h.p.y < H(h.p.xz)) m.e = vec3(1.,0.,0.);
-  } else
+    m.Cd = mg(h.p.xz);
+    //if (h.p.y < H(h.p.xz)) m.e = vec3(1.,0.,0.);
+  } else {
   if (h.mid == 2) {
     m.e = vec3(0.);
     vec3 wn=floor(h.p);
@@ -240,7 +265,14 @@ mat_t material(hit_t h) {
       m.e = 10. * (vec3(.6) + .2 * (noise(wn.yz).wzy+noise(wn.xx).xwz)) * step(1.1, noise(wn.xy).x + noise(wn.zz).z);
     }
     m.Cd = vec3(1.);
-  }
+  } else {
+  if (h.mid == 3) {
+    m.e = vec3(0.);
+    vec3 cp = abs(h.p - h.c.c);
+    m.Cd = mix(mg(h.p.xz), vec3(.1), step(GRIDSIZE*.5-2., max(cp.x,cp.z)));
+    m.Cs = vec3(.3);
+    //m.s = 0.; // well well, this is some nasty bug we have here, nvidia
+  }}}
   return m;
 }
 
@@ -251,11 +283,11 @@ vec3 brdf(hit_t h, mat_t m, vec3 wi) {
   return // diffuse
     .3875077 * m.Cd * (vec3(1.) - m.Cs) * (1. - pow(1.-.5*ci,5.)) * (1. - pow(1.-.5*co,5.))
     + // specular
-    .0015831 * (m.s + 4.) * pow(dot(h.n, wh), m.s) * (m.Cs + pow(1. - ch, 5.) * (vec3(1.) - m.Cs)) / max(1e-3, ch * max(ci, co))
-;
+    .0015831 * (m.s + 4.) * pow(dot(h.n, wh), m.s) * (m.Cs + pow(1. - ch, 5.) * (vec3(1.) - m.Cs)) / max(1e-1, ch * max(ci, co))
+    ;
 }
 
-vec3 solid_bounce(hit_t h){
+vec3 ref(hit_t h){
   vec3 r=rand().zyx*2.-vec3(1.);
   return normalize(r*sign(dot(r,h.n)));
 }
@@ -263,9 +295,7 @@ vec3 solid_bounce(hit_t h){
 vec3 air(vec3 O, vec3 D) {
   return 30. * vec3(1.) * smoothstep(.999,.9999,dot(D,sundir))
     + pow(
-    //vec3(135., 206., 235.)/255.
-    vec3(0., 191., 255.)/255.
-    //vec3(128., 218., 235.)/255.
+    vec3(128., 218., 235.)/255.
     , vec3(2.2));
 
 }
@@ -280,16 +310,11 @@ MAKE_Q(float)
 void main(){
   vec2 res=vec2(1280.,720.);
   vec2 uv=gl_FragCoord.xy/res-vec2(.5);uv.x*=res.x/res.y;
-  //vec3 O=vec3(16.,190.,300.),D=normalize(vec3(uv,-2.));
-  //vec3 O=vec3(sin(t*.01)*100.,50.,cos(t*.01)*300.),D=normalize(vec3(uv,-2.));
-  //vec3 O=vec3(sin(t)*1000.,50.,cos(t)*1000.),D=normalize(vec3(uv,-2.));
-  //O.y+=h2(O.xz);
-
   vec3 O=_cp,D=normalize(vec3(uv,2.))*_cm;
   O.y = max(O.y, h2(O.xz)+10.);
 
   // FIXME replace with lens/sampler model
-  O+=noise(vec2(_t)).xyz*vec3(.3,.3,.3);
+  O+=noise(vec2(_t)*gl_FragCoord.xy).xyz*vec3(.3,.3,.3);
 
   vec3 color = vec3(0.), transm=vec3(1.);
 #if 0
@@ -328,10 +353,9 @@ void main(){
       O = h.p + h.n * EPS;
       // importance
       if (trace_grid(O, sundir, 100.).l >= 100.) c += brdf(h, m, sundir) * air(O, sundir);
-      vec3 nD = solid_bounce(h);
+      D = ref(h);
       color += transm * c;
-      transm *= brdf(h, m, nD);
-      D = nD;
+      transm *= brdf(h, m, D);
       Lmax *= .6;
     } else {
       color += transm * air(O, D);
@@ -339,5 +363,5 @@ void main(){
   }
   //color = max(vec3(0.), color);
 #endif
-  gl_FragColor = vec4(pow(color,vec3(1./2.2)),1.);
+  gl_FragColor = vec4(color,1.);
 }
