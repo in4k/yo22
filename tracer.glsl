@@ -16,7 +16,7 @@ vec4 rand(){rand_state_=int(mod(float(rand_state_+1),1024.*1024.));return noise(
 
 #define STEPS (128*2)
 #define HIT_EPS .01
-#define FAR 3000.
+#define FAR 4000.
 #define BOUNCES 3
 #define SKY FAR
 #define GRIDSIZE 32.
@@ -35,7 +35,7 @@ vec3 terrain_normal(vec2 p){
   vec2 e=vec2(1.,.0);
   vec3 dx=vec3(2.*e.x,h(p+e.xy)-h(p-e.xy),0.);
   vec3 dz=vec3(0.,h(p+e.yx)-h(p-e.yx),2.*e.x);
-  return normalize(cross(dz,dx));
+  return normalize(cross(dz,dx));//+1.5*noise(p*134.241));
 }
 
 vec3 terrain_albedo(vec3 p){
@@ -101,32 +101,39 @@ float dist_terrain(vec3 p,vec3 D) {
   return p.y-H;
 }
 
-float dist_block(vec3 p, vec4 P) {
-  vec2 cell = floor(p.xz/GRIDSIZE);
-  vec2 cellc = cell*GRIDSIZE + GRIDSIZE/2.;
-  vec3 cellcenter = vec3(cellc.x, h(cellc), cellc.y);
-  vec4 crand = noise(cell);
-  crand.y = mix(crand.y, -100., step(.5, crand.w));
-  float h = P.y-P.w;
-  //return (h < 1.)?1e6:dbox(p-cellcenter, vec3((.1+crand.x*.35)*GRIDSIZE*.5, crand.y*(P.y-P.z), (.05+crand.z*.4)*GRIDSIZE*.5));
-  return (h < 10.)?1e6:dbox(p-cellcenter, vec3(GRIDSIZE*(.05+.3*crand.x), h*(.4+.6*crand.y), GRIDSIZE*(.05+.3*crand.z)));
+struct cell_t {
+  vec2 i;
+  vec3 c,m,M;
+  float B,H,h,p,Bh;
+};
+
+cell_t cell_identify(vec3 p) {
+  cell_t c;
+  c.i = floor(p.xz/GRIDSIZE);
+  c.m = c.i.xyy*GRIDSIZE;
+  vec4 P = plan(c.m.xz); c.p = P.x;
+  c.B = P.y; c.H = P.w; c.h = P.z; c.Bh = c.B - c.H;
+  c.m.y = c.h;
+  c.M = c.m + vec3(GRIDSIZE, c.B, GRIDSIZE);
+  c.c = c.m + vec3(GRIDSIZE, c.H-c.h, GRIDSIZE) * .5;
+  return c;
 }
 
-vec3 block_normal(vec3 p, vec4 P){
+float dist_block(vec3 p, cell_t c) {
+  vec4 crand = noise(c.i);
+  crand.y = mix(crand.y, -100., step(.5, crand.w));
+  //return (h < 1.)?1e6:dbox(p-cellcenter, vec3((.1+crand.x*.35)*GRIDSIZE*.5, crand.y*(P.y-P.z), (.05+crand.z*.4)*GRIDSIZE*.5));
+  return (c.Bh < 10.)?1e6:dbox(p-c.c, vec3(GRIDSIZE*(.05+.3*crand.x), c.Bh*(.4+.6*crand.y), GRIDSIZE*(.05+.3*crand.z)));
+}
+
+vec3 block_normal(vec3 p, cell_t c){
   vec2 e=vec2(.01,.0);
   return normalize(vec3(
-    dist_block(p+e.xyy,P)-dist_block(p-e.xyy,P),
-    dist_block(p+e.yxy,P)-dist_block(p-e.yxy,P),
-    dist_block(p+e.yyx,P)-dist_block(p-e.yyx,P)
+    dist_block(p+e.xyy,c)-dist_block(p-e.xyy,c),
+    dist_block(p+e.yxy,c)-dist_block(p-e.yxy,c),
+    dist_block(p+e.yyx,c)-dist_block(p-e.yyx,c)
     ));
 }
-
-//struct material_t {vec3 d,s,e;}
-
-struct cell_t {
-  float B,H,h;
-  vec3 m,M;
-};
 
 struct hit_t {
   int mid;
@@ -135,9 +142,9 @@ struct hit_t {
   float _gc,_mc;
 };
 
-hit_t hit_block(hit_t h, vec4 P) {
+hit_t hit_block(hit_t h, cell_t c) {
   h.mid = 2;
-  h.n = block_normal(h.p, P);
+  h.n = block_normal(h.p, c);
   return h;
 }
 
@@ -166,30 +173,29 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
   h.i = D;
   h._gc = h._mc = 0.; // DEBUG
   float dl = 0.;
-  vec4 P=vec4(1e6);
+  cell_t c; c.B = 1e6;
   for (int i = 0; i < STEPS; ++i) {
     if (h.l > Lmax) break;
     h.p = O + D * h.l;
-    if (dl < HIT_EPS || h.p.y > P.y) {
+    if (dl < HIT_EPS || h.p.y > c.B) {
       h._gc += 1.;
       h.l += dl;
       h.p = O + D * h.l;
+      c = cell_identify(h.p);
+      //P(#,B,h,H)
       // TODO skipsize dependent on D.y
-      vec2 cp = floor(h.p.xz/GRIDSIZE)*GRIDSIZE;
-      float dx = xp(h.p.x,D.x,vec2(cp.x,cp.x+GRIDSIZE));
-      float dz = xp(h.p.z,D.z,vec2(cp.y,cp.y+GRIDSIZE));
+      float dx = xp(h.p.x, D.x, vec2(c.m.x, c.m.x + GRIDSIZE));
+      float dz = xp(h.p.z, D.z, vec2(c.m.z, c.m.z + GRIDSIZE));
       //ASSERT(dz >= 0.,0.,1.,1.)
       //ASSERT(dx >= 0.,0.,.5,1.)
       //ASSERT(h.p.z >= cp.y,1.,1.,0.)
       //ASSERT(h.p.z <= cp.y+GRIDSIZE,1.,0.,1.)
-      P = plan(h.p.xz);
-      //P(#,B,h,H)
       float dy =
-        (h.p.y>P.y) ?
-          xp(h.p.y,D.y,vec2(P.y,SKY)) :
-        ((h.p.y>P.w) ?// && (P.y-P.w) > 0.) ?
-          xp(h.p.y,D.y,vec2(P.w,P.y)) :
-          xp(h.p.y,D.y,vec2(P.z,P.w)));
+        (h.p.y > c.B) ?
+          xp(h.p.y, D.y, vec2(c.B, SKY)) :
+        ((h.p.y > c.H) ?// && (P.y-P.w) > 0.) ?
+          xp(h.p.y, D.y, vec2(c.H, c.B)) :
+          xp(h.p.y, D.y, vec2(c.h, c.H)));
       //ASSERT(dy >= 0.,.5,.5,1.)
       dl = min(dx,min(dy,dz));
       //ASSERT(dl >= 0.,.5,.5,.5)
@@ -197,9 +203,9 @@ hit_t trace_grid(vec3 O, vec3 D, float Lmax) {
       //if (dl < 0.) {c=vec3(1.,float(i),h.l);break;}
     } else {
       h._mc += 1.;
-      float d = dist_block(h.p, P);
-      if (d < HIT_EPS) return hit_block(h, P);
-      if (h.p.y < P.w)
+      float d = dist_block(h.p, c);
+      if (d < HIT_EPS) return hit_block(h, c);
+      if (h.p.y < c.B)
       {
         d = min(d, dist_terrain(h.p, D));
         if (d < HIT_EPS) return hit_terrain(h);

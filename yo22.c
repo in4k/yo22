@@ -150,7 +150,7 @@ enum {
 
 enum {
   PhaseTerrainErosion_Iter = 1024,
-  PhasePathtrace_Iter = 256,
+  PhasePathtrace_Iter = 64,
 
   PhaseGenerate = 0,
   PhaseErodeBegin = PhaseGenerate,
@@ -339,6 +339,7 @@ enum {
 
 static GLuint program;
 static void use_program(int index) {
+  u_step += 1;
   program = programs[index];
   gl.UseProgram(program);
   gl.Uniform1f(program_locs[index].step, u_step);
@@ -474,7 +475,6 @@ static void yo22_sundir(float x, float y) {
 }
 
 static void yo22_paint() {
-  u_step += 1;
   u_progress = (float)program_counter / PhaseComplete;
   u_progress_erosion = (float)(program_counter - PhaseErodeBegin) / PhaseTerrainErosion_Iter;
   u_progress_trace = (float)(program_counter - PhasePathtraceBegin) / PhasePathtrace_Iter;
@@ -491,7 +491,7 @@ static void yo22_paint() {
   }
 
   if (program_counter < PhaseErodeEnd) {
-    int j;for(j=0;j<1;++j){
+    int j;for(j=0;j<2;++j){
       bind_framebuffer(TexTerrain1);
       use_program(ProgTerrainErode);
       bind_texture(TexTerrain0, SamplerBinding_Terrain);
