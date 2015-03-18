@@ -46,7 +46,8 @@ vec3 terrain_normal(vec2 p){
   vec2 e=vec2(1.,.0);
   vec3 dx=vec3(2.*e.x,H(p+e.xy)-H(p-e.xy),0.);
   vec3 dz=vec3(0.,H(p+e.yx)-H(p-e.yx),2.*e.x);
-  return normalize(cross(dz,dx));//+1.5*noise(p*134.241));
+  //return normalize(cross(dz,dx));//+1.5*noise(p*134.241));
+  return normalize(cross(dz,dx)+3.5*(noise(p*7.31).yxz-vec3(.5)));
 }
 
 vec3 terrain_albedo(vec3 p){
@@ -99,7 +100,7 @@ struct cell_t {
   vec2 i;
   vec3 c,m,M,BB;
   vec4 S;
-  float B,H,h,p,Bh;
+  float B,H,h,p,Bh,f;
 };
 
 cell_t cell_identify(vec3 p) {
@@ -113,18 +114,20 @@ cell_t cell_identify(vec3 p) {
   c.c = c.m + vec3(GRIDSIZE, c.H-c.h, GRIDSIZE) * .5;
   c.S = noise(c.i+vec2(23.,17.)).wyzx;
   c.BB = vec3(GRIDSIZE*.5-4., c.Bh, GRIDSIZE*.5-4.);
+  c.f = 9.+.2*c.S.y;
   return c;
 }
 
 float bd1(vec3 p, cell_t c) {
+vec2 e=vec2(1.,0.);
   float d = 1e6;
-  vec3 S = vec3(GRIDSIZE*.5-4., c.Bh, GRIDSIZE*.5-4.)*7.;
-  S.xz *= .6 + .4*c.S.yw;
-  for (int i = 0; i < 4; ++i) {
-    vec4 r = .5 * (c.S + noise(vec2(c.S.w, float(i))));
-    //vec3 s = vec3(GRIDSIZE*(.05+.3*S.x), c.Bh*(.4+.6*S.y), GRIDSIZE*(.05+.3*S.z));
-    d = min(d, dbox(p, S));
-    S *= r.wyz;
+  vec3 s = c.BB * vec3(.2+.3*c.S.z,1.,.2+.3*c.S.y);
+  for (int i = 0; i < 4; ++i)
+  {
+    vec3 pp = p-(c.BB-s)*(2.*vec3(c.S.w,0.,c.S.z)-vec3(1.));
+    d = min(d, dbox(pp, s));
+    s += vec3(.2+c.S.x, 0., .2+c.S.y) * .2 * c.BB;
+    s.y *= .7+.1*c.S.z;
   }
   return d;
 }
@@ -243,7 +246,7 @@ struct mat_t {
 };
 
 vec3 mg(vec2 p) {
-  return vec3(.2,.6,.23) + .2 * (noise(p*.2).xxx-vec3(.5));
+  return vec3(.2,.6,.23)*.3 + .1 * (noise(p*.2).xxx-vec3(.5));
 }
 
 mat_t material(hit_t h) {
@@ -252,10 +255,13 @@ mat_t material(hit_t h) {
   m.Cd = vec3(0.);
   m.Cs = vec3(0.);
   m.s = 0.;
+  vec3 cp = abs(abs(h.p - h.c.c) - vec3(GRIDSIZE,0.,GRIDSIZE)*.5);
 
   if(h.mid == 1) {
+    float f = step(h.p.y+h.c.S.w*50.+20.*noise(h.p.xz).x,180.);
     m.e = vec3(0.);
-    m.Cd = mg(h.p.xz);
+    m.Cd = mg(h.p.xz) + vec3(.1,.1,.02)*h.c.S.xyz*f;
+    m.Cd = mix(m.Cd, vec3(.11, .07, .03), .4*f*step(min(cp.x,cp.z), 1.));
     //if (h.p.y < H(h.p.xz)) m.e = vec3(1.,0.,0.);
   } else {
   if (h.mid == 2) {
@@ -264,12 +270,11 @@ mat_t material(hit_t h) {
     if (mod(wn,vec3(3.)) == vec3(0.)) {
       m.e = 10. * (vec3(.6) + .2 * (noise(wn.yz).wzy+noise(wn.xx).xwz)) * step(1.1, noise(wn.xy).x + noise(wn.zz).z);
     }
-    m.Cd = vec3(1.);
+    m.Cd = vec3(.2) + .2*h.c.S.x+.1*h.c.S.ywz;
   } else {
   if (h.mid == 3) {
     m.e = vec3(0.);
-    vec3 cp = abs(h.p - h.c.c);
-    m.Cd = mix(mg(h.p.xz), vec3(.1), step(GRIDSIZE*.5-2., max(cp.x,cp.z)));
+    m.Cd = mix(mg(h.p.xz), vec3(.1), step(min(cp.x,cp.z), 2.));
     m.Cs = vec3(.3);
     //m.s = 0.; // well well, this is some nasty bug we have here, nvidia
   }}}
@@ -282,8 +287,8 @@ vec3 brdf(hit_t h, mat_t m, vec3 wi) {
   //return m.Cd * ci;
   return // diffuse
     .3875077 * m.Cd * (vec3(1.) - m.Cs) * (1. - pow(1.-.5*ci,5.)) * (1. - pow(1.-.5*co,5.))
-    + // specular
-    .0015831 * (m.s + 4.) * pow(dot(h.n, wh), m.s) * (m.Cs + pow(1. - ch, 5.) * (vec3(1.) - m.Cs)) / max(1e-1, ch * max(ci, co))
+    //+ // specular (borken)
+    //.0015831 * (m.s + 4.) * pow(dot(h.n, wh), m.s) * (m.Cs + pow(1. - ch, 5.) * (vec3(1.) - m.Cs)) / max(1e-1, ch * max(ci, co))
     ;
 }
 
@@ -308,7 +313,8 @@ MAKE_Q(float)
 #define CHECK_ASSERT if(assertcolor_.a!=0.){gl_FragColor=assertcolor_*1e3;return;}
 
 void main(){
-  vec2 res=vec2(1280.,720.);
+  //vec2 res=vec2(1280.,720.);
+  vec2 res=vec2(1920.,1080.);
   vec2 uv=gl_FragCoord.xy/res-vec2(.5);uv.x*=res.x/res.y;
   vec3 O=_cp,D=normalize(vec3(uv,2.))*_cm;
   O.y = max(O.y, h2(O.xz)+10.);
@@ -345,10 +351,6 @@ void main(){
 
     if (h.mid > 0) {
       mat_t m = material(h);
-      //if (p.y-H(p.xz)>EPS*lt){gl_FragColor=vec4(1.,0.,0.,1.);return;}
-      //if (H(p.xz)>p.y){gl_FragColor=vec4(1.,0.,1.,1.);return;}
-      //mat3 m = geometry_material(p);
-      //vec3 c = m[1];
       vec3 c = m.e;
       O = h.p + h.n * EPS;
       // importance

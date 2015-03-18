@@ -134,7 +134,7 @@ FUNCLIST FUNCLIST_DBG
 #define CHECK(cond, errmsg)
 #endif
 
-#if 1
+#if 0
 #define WIDTH 1280
 #define HEIGHT 720
 #else
@@ -228,12 +228,12 @@ static void bind_framebuffer(int target_index) {
 }
 
 static float u_step = 0, u_progress, u_progress_erosion, u_progress_trace;
-static float u_sundir[3] = { -.3672, .4572, .81 };
-static float u_campos[3] = { 951.679565, 599.804443, 4472.438965 };
+static float u_sundir[3] = { -0.068894, 0.123868, 0.989904 };
+static float u_campos[3] = { 1941.982910, 402.375183, 2946.904297 };
 static float u_cammat[9] = {
-  0.761736, -0.200912, -0.615949,
-  -0.000000, 0.950703, -0.310104,
-  0.647888, 0.236217, 0.724184
+  0.965935, 0.041722, 0.255401,
+  -0.006570, 0.990554, -0.136966,
+  -0.258703, 0.130622, 0.957084
 };
 static int width, height;
 
@@ -283,9 +283,9 @@ static void camera_update() {
   vcross(u_cammat+0, u_cammat+3, u_cammat+6);
   vcross(u_cammat+3, u_cammat+6, u_cammat+0);
   vnormalize(u_cammat+3);
-  pfv("CAMMAT", u_cammat, 9, 3);
 #define S(a,b) {float t=u_cammat[a];u_cammat[a]=u_cammat[b];u_cammat[b]=t;}
   S(1,3) S(2,6) S(5,7)
+  pfv("CAMMAT", u_cammat, 9, 3);
   if (program_counter > PhasePathtraceBegin) program_counter = PhasePathtraceBegin;
 }
 static void camera_rotate(const float *v, float a) {
@@ -704,7 +704,7 @@ int main(int argc, char *argv[]) {
   winattrs.override_redirect = False;
 
   window = XCreateWindow(display, RootWindow(display, vinfo->screen),
-    0, 0, 1280, 720,
+    0, 0, WIDTH, HEIGHT,
     0, vinfo->depth, InputOutput, vinfo->visual,
     CWBorderPixel | CWBitGravity | CWEventMask | CWColormap,
     &winattrs);
@@ -969,4 +969,14 @@ CAMMAT:
       -0.444706, -0.233085, 0.864817,
 CAMPOS:
   11212.572266, 579.664124, 11112.230469,
+
+
+
+sun -0.068894, 0.123868, 0.989904
+CAMMAT:
+  0.953873, 0.000010, -0.300211,
+    0.028537, 0.995469, 0.090704,
+      0.298851, -0.095087, 0.949551
+CAMPOS:
+  1941.982910, 402.375183, 2946.904297,
  */
