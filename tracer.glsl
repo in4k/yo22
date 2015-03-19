@@ -25,7 +25,7 @@ float fbm(vec2 v,float s) {
   return r;
 }
 
-#define STEPS (128*2)
+#define STEPS 256
 #define EPS .01
 #define FAR 5000.
 #define BOUNCES 3
