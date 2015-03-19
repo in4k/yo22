@@ -1,4 +1,4 @@
-uniform float _t,_p;
+uniform float _t,_p,_pt;
 uniform vec2 _r;
 uniform vec3 _s,_cp;
 uniform mat3 _cm;

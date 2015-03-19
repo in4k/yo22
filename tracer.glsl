@@ -1,6 +1,6 @@
 const float EPS = .01, FAR = 5000., SKY = FAR, GS = 32.;
 
-vec3 sundir = normalize(_s);//vec3(.1,.036,.037));
+//vec3 _s = normalize(_s);//vec3(.1,.036,.037));
 
 float maxv(vec3 v){return max(v.x,max(v.y,v.z));}
 float dbox(vec3 p,vec3 sz){
@@ -12,7 +12,7 @@ float H(vec2 p){vec4 c=TT(p);return c.z
   // grass
   +.5*n4(p).z*step(.5,n4(p*.17).w)
   // forests
-  +4.*n4(p*.8).z*step(.6,n4(p*.02).w)
+  +4.*n4(p*.3).z*step(.6,n4(p*.02).w)
 ;}
 float TD(vec3 p,vec3 D) {
   float h = H(p.xz);
@@ -102,14 +102,41 @@ struct hit_t {
   float _gc, _mc; // DEBUG
 };
 
+// colors: emission, diffuse, specular
+vec3 Ce, Cd, Cs;
+
+// grass color
+vec3 mg(vec2 p) {
+  return vec3(.2,.6,.23)*.3 + .2 * (n4(p*.2).xxx-vec3(.5));
+}
+
 hit_t BH(hit_t h) {
-  h.mid = 2;
+h.mid = 1;
+  vec3 wn = floor(h.p);
+  if (mod(wn,vec3(3.)) == vec3(0.))
+    Ce = 10. * (vec3(.6) + .2 * (n4(wn.yz).wzy+n4(wn.xx).xwz)) * step(1.1, n4(wn.xy).x + n4(wn.zz).z);
+  else
+    Ce = vec3(0.);
+  Cd = vec3(.2) + .2*h.c.S.x+.1*h.c.S.ywz;
+  //Cs = vec3(.0);
   h.n = BN(h.p, h.c);
   return h;
 }
 
 hit_t TH(hit_t h) {
-  h.mid = (h.c.Bh > 10.) ? 3 : 1;
+h.mid = 1;
+  vec3 cp = abs(abs(h.p - h.c.c) - vec3(GS,0.,GS)*.5);
+  if(h.c.Bh < 10.) {
+    float f = step(h.p.y+h.c.S.w*50.+20.*n4(h.p.xz).x,180.);
+    //Ce = vec3(0.);
+    Cd = mg(h.p.xz) + vec3(.1,.1,.02)*h.c.S.xyz*f;
+    Cd = mix(Cd, vec3(.11, .07, .03), .4*f*step(min(cp.x,cp.z), 1.));
+  } else {
+    //Ce = vec3(0.);
+    Cd = mix(mg(h.p.xz), vec3(.1), step(min(cp.x,cp.z), 2.));
+    Cs = vec3(.3);
+    //m.s = 0.; // well well, this is some nasty bug we have here, nvidia
+  }
   h.n = TN(h.p.xz);
   return h;
 }
@@ -168,7 +195,7 @@ hit_t RT(vec3 O, vec3 D, float Lmax) {
     {
       h._mc += 1.;
       float d = BD(h.p, h.c);
-      if (d < de) return BH(h);
+      if (d < de) return BH(h);//{BH(h); return h;}
       if (h.p.y < h.c.H)
       {
         d = min(d, TD(h.p, D));
@@ -187,55 +214,14 @@ hit_t RT(vec3 O, vec3 D, float Lmax) {
   return h;
 }
 
-struct mat_t {
-  vec3 e, Cd, Cs;
-  float s;
-};
-
-vec3 mg(vec2 p) {
-  return vec3(.2,.6,.23)*.3 + .2 * (n4(p*.2).xxx-vec3(.5));
-}
-
-mat_t M(hit_t h) {
-  mat_t m;
-  m.e = vec3(1., 0., 1.);
-  m.Cd = vec3(0.);
-  m.Cs = vec3(0.);
-  m.s = 0.;
-  vec3 cp = abs(abs(h.p - h.c.c) - vec3(GS,0.,GS)*.5);
-
-  if(h.mid == 1) {
-    float f = step(h.p.y+h.c.S.w*50.+20.*n4(h.p.xz).x,180.);
-    m.e = vec3(0.);
-    m.Cd = mg(h.p.xz) + vec3(.1,.1,.02)*h.c.S.xyz*f;
-    m.Cd = mix(m.Cd, vec3(.11, .07, .03), .4*f*step(min(cp.x,cp.z), 1.));
-    //if (h.p.y < H(h.p.xz)) m.e = vec3(1.,0.,0.);
-  } else {
-  if (h.mid == 2) {
-    m.e = vec3(0.);
-    vec3 wn=floor(h.p);
-    if (mod(wn,vec3(3.)) == vec3(0.)) {
-      m.e = 10. * (vec3(.6) + .2 * (n4(wn.yz).wzy+n4(wn.xx).xwz)) * step(1.1, n4(wn.xy).x + n4(wn.zz).z);
-    }
-    m.Cd = vec3(.2) + .2*h.c.S.x+.1*h.c.S.ywz;
-  } else {
-  if (h.mid == 3) {
-    m.e = vec3(0.);
-    m.Cd = mix(mg(h.p.xz), vec3(.1), step(min(cp.x,cp.z), 2.));
-    m.Cs = vec3(.3);
-    //m.s = 0.; // well well, this is some nasty bug we have here, nvidia
-  }}}
-  return m;
-}
-
-vec3 brdf(hit_t h, mat_t m, vec3 wi) {
+vec3 brdf(hit_t h, vec3 wi) {
   vec3 wo=-h.i,wh=normalize(wi+wo);
   float ci=max(0.,dot(h.n,wi)),co=max(0.,dot(h.n,wo)),ch=dot(wi,wh);
-  //return m.Cd * ci;
+  //return mCd * ci;
   return // diffuse
-    .3875077 * m.Cd * (vec3(1.) - m.Cs) * (1. - pow(1.-.5*ci,5.)) * (1. - pow(1.-.5*co,5.))
+    .3875077 * Cd * (vec3(1.) - Cs) * (1. - pow(1.-.5*ci,5.)) * (1. - pow(1.-.5*co,5.))
     //+ // specular (borken)
-    //.0015831 * (m.s + 4.) * pow(dot(h.n, wh), m.s) * (m.Cs + pow(1. - ch, 5.) * (vec3(1.) - m.Cs)) / max(1e-1, ch * max(ci, co))
+    //.0015831 * (m.s + 4.) * pow(dot(h.n, wh), m.s) * (mCs + pow(1. - ch, 5.) * (vec3(1.) - mCs)) / max(1e-1, ch * max(ci, co))
     ;
 }
 
@@ -263,7 +249,7 @@ float ER(vec3 o, vec3 d, float r) {
 
 void SD(vec3 O, out float M, out float R) {
   float h = length(O - C) - R0;
-  M = 3. * exp(-h / 200.);
+  M = exp(-h / 200.);
   R = exp(-h / 8000.);
   //if (cl < h && h < ch) {
   //  float kh = smoothstep(cl, ch, h);
@@ -278,8 +264,8 @@ void SD(vec3 O, out float M, out float R) {
   //}
 }
 
-vec2 integrate_depth(vec3 O, vec3 D, float L) {
-  float depth_m = 0., depth_r = 0.;
+vec2 Id(vec3 O, vec3 D, float L) {
+  float dm = 0., dr = 0.;
   float base_dx = L / 16.;
   vec3 p = O;
   float ll = 0.;
@@ -288,21 +274,21 @@ vec2 integrate_depth(vec3 O, vec3 D, float L) {
     p = O + D * (ll + dx);
     float Dr, Dm;
     SD(p, Dm, Dr);
-    depth_m += Dm * dx;
-    depth_r += Dr * dx;
+    dm += Dm * dx;
+    dr += Dr * dx;
     ll += base_dx;
   }
-  return vec2(depth_m, depth_r);
+  return vec2(dm, dr);
 }
 
-vec3 scatter_length(vec3 O, vec3 D, float L, vec3 color) {
-	float c = max(0., dot(D, sundir));
+vec3 S(vec3 O, vec3 D, float L, vec3 color) {
+	float c = max(0., dot(D, _s));
   float Ph_r = .0596831 * (1. + c * c);
   float Ph_m = .1193662 * (1. - g2) * (1. + c * c) / ((2. + g2) * pow(1. + g2 - 2.*g*c, 1.5));
-  float depth_m = 0.;
-  float depth_r = 0.;
-  vec3 I_sun_m = vec3(0.);
-  vec3 I_sun_r = vec3(0.);
+  float dm = 0.;
+  float dr = 0.;
+  vec3 im = vec3(0.);
+  vec3 ir = vec3(0.);
 
   float base_dx = L / 32.;
   float ll = 0.;
@@ -314,31 +300,31 @@ vec3 scatter_length(vec3 O, vec3 D, float L, vec3 color) {
     float Dr, Dm;
     SD(p, Dm, Dr);
     Dm *= dx; Dr *= dx;
-    depth_m += Dm;
-    depth_r += Dr;
+    dm += Dm;
+    dr += Dr;
 
     // if shadowed by terrain
-    //float Lt = TT(p, sundir);
+    //float Lt = TT(p, _s);
     //if (Lt < Far) continue;
 
-    float sunray_L = ER(p,sundir,R1);
+    float sunray_L = ER(p,_s,R1);
 
     vec2 dd = vec2(0.);
-    dd = integrate_depth(p, sundir, sunray_L);
-    float sunray_depth_m = dd.x, sunray_depth_r = dd.y;
+    dd = Id(p, _s, sunray_L);
+    float sunray_dm = dd.x, sunray_dr = dd.y;
 
     vec3 I_sun = exp(-(
-        Km * (sunray_depth_m + depth_m) +
-        Kr * (sunray_depth_r + depth_r)
+        Km * (sunray_dm + dm) +
+        Kr * (sunray_dr + dr)
       ));
-    I_sun_m += Dm * I_sun;
-    I_sun_r += Dr * I_sun;
+    im += Dm * I_sun;
+    ir += Dr * I_sun;
   }
 
   return I * (
-      Km * Ph_m * I_sun_m +
-      Kr * Ph_r * I_sun_r)
-    + color * exp(-(Km * depth_m + Kr * depth_r));
+      Km * Ph_m * im +
+      Kr * Ph_r * ir)
+    + color * exp(-(Km * dm + Kr * dr));
 }
 
 //vec3 scatter(vec3 O, vec3 D, float L_max, vec3 L_color) {
@@ -350,16 +336,12 @@ vec3 scatter_length(vec3 O, vec3 D, float L, vec3 color) {
 //  return scatter_length(O, D, L_max, L_color);
 //}
 
-vec3 air(vec3 O, vec3 D) {
-  return 30. * vec3(1.) * smoothstep(.999,.9999,dot(D,sundir))
-    + pow(
-    vec3(128., 218., 235.)/255.
-    , vec3(2.2));
-}
-
-vec3 S(vec3 O, vec3 D, float L, vec3 c) {
-  return scatter_length(O, D, L, c);
-}
+//vec3 air(vec3 O, vec3 D) {
+//  return 30. * vec3(1.) * smoothstep(.999,.9999,dot(D,_s))
+//   + pow(
+//    vec3(128., 218., 235.)/255.
+//    , vec3(2.2));
+//}
 
 // DEBUG
 //#define MAKE_Q(T) T quantize(T a,T b,int n,T v){return floor(float(n)*(v-a)/(b-a));}
@@ -377,7 +359,7 @@ void main(){
   // FIXME replace with lens/sampler model
   O+=n4(vec2(_t)*gl_FragCoord.xy).xyz*vec3(.3,.3,.3);
 
-  vec3 color = vec3(0.), ct=vec3(1.);
+  vec3 c = vec3(0.), ct = vec3(1.);
 //#if 0
   //hit_t t = trace_grid(O, D, FAR);
   //CHECK_ASSERT
@@ -400,27 +382,30 @@ void main(){
 //#else
   float f = FAR;
   vec3 pO = O;
-  for (int i = 0; i < 3; ++i){
+  for (int i = 0; i < 1; ++i){
     if (dot(ct,ct) < .001) break;
+    Ce = Cd = Cs = vec3(0.);
     hit_t h = RT(O, D, f);
   //CHECK_ASSERT
 
     if (h.mid > 0) {
-      mat_t m = M(h);
-      vec3 c = m.e;
+      vec3 hc = Ce;
       O = h.p + h.n * EPS;
       // importance
-      if (RT(O, sundir, 100.).l >= 100.) c += brdf(h, m, sundir) * air(O, sundir);
-      color += ct * S(pO, D, h.l, c);
+      vec3 cd = Cd, cs = Cs;
+      if (RT(O, _s, 100.).l >= 100.)
+      {
+        Cd = cd; Cs = cs;
+        hc += brdf(h, _s) * max(S(O, _s, ER(O, _s, R1), vec3(I*3.)),vec3(0.));
+      }
+      c += ct * S(pO, D, h.l, hc);
       D = ref(h);
-      ct *= brdf(h, m, D);
+      ct *= brdf(h, D);
       f *= .6;
     } else {
-      color += ct * max(S(O, D, ER(O, D, R1), vec3(0.)),vec3(0.));//air(O, D);
-      //color += ct * air(O, D);
+      c += ct * max(S(O, D, ER(O, D, R1), vec3(0.)),vec3(0.));
     }
   }
-  //color = max(vec3(0.), color);
 //#endif
-  gl_FragColor = vec4(color,1.);
+  gl_FragColor = vec4(c,1.);
 }
