@@ -134,7 +134,7 @@ FUNCLIST FUNCLIST_DBG
 #define CHECK(cond, errmsg)
 #endif
 
-#if 0
+#if 1
 #define WIDTH 1280
 #define HEIGHT 720
 #else
@@ -182,7 +182,7 @@ enum {
 #ifndef TOOL
 #include "shaders.h"
 #else
-static const char *fragment_shaders[Prog_COUNT] = {NULL, NULL, NULL, NULL, NULL};
+static const char *fragment_shaders[Prog_COUNT+1] = {NULL, NULL, NULL, NULL, NULL};
 #endif
 
 static const char *vertex_shader_source = "attribute vec4 v;varying vec2 V;void main(){gl_Position=v;V=v.xy;}";
@@ -226,12 +226,21 @@ static void bind_framebuffer(int target_index) {
 }
 
 static float u_step = 0, u_progress, u_progress_erosion, u_progress_trace;
-static float u_sundir[3] = { -0.068894, 0.123868, 0.989904 };
-static float u_campos[3] = { 1941.982910, 402.375183, 2946.904297 };
+static float u_sundir[3] = {
+  //-0.068894, 0.123868, 0.989904
+  0.439979, 0.278467, 0.853741
+};
+static float u_campos[3] = {
+  //1941.982910, 402.375183, 2946.904297
+  1809.029175, 252.536713, 4026.856445
+};
 static float u_cammat[9] = {
-  0.965935, 0.041722, 0.255401,
-  -0.006570, 0.990554, -0.136966,
-  -0.258703, 0.130622, 0.957084
+//  0.965935, 0.041722, 0.255401,
+//  -0.006570, 0.990554, -0.136966,
+//  -0.258703, 0.130622, 0.957084
+  0.920377, 0.047924, 0.388084,
+  -0.006570, 0.994217, -0.107192,
+  -0.390977, 0.096107, 0.915369,
 };
 static int width, height;
 
@@ -396,7 +405,19 @@ static GLuint create_and_compile_program(int index) {
   int i;
 #ifdef DEBUG
   GLint status;
-  if (fragment_shaders[index] == 0) return 0;
+  fprintf(stderr, "%s %d\n", __FUNCTION__, index);
+  if (fragment_shaders[index] == 0 || fragment_shaders[Prog_COUNT] == 0) return 0;
+
+  if (index == Prog_COUNT) {
+#ifdef TOOL
+    int r = 1;
+    for (i = 0; i < Prog_COUNT; ++i)
+      r = (r && create_and_compile_program(i));
+    return r;
+#else
+    CHECK(0, "index == Prog_COUNT");
+#endif
+  }
 #endif
 
   const char *sources[2] = {fragment_shaders[Prog_COUNT], fragment_shaders[index]};
@@ -576,13 +597,13 @@ struct file_program_t {
   int watch;
   int updated;
 };
-static struct file_program_t files[Prog_COUNT];
+static struct file_program_t files[Prog_COUNT+1];
 static int inotifyfd;
 static void monitor_changes() {
   char buffer[sizeof(struct inotify_event) + NAME_MAX + 1];
   int i;
 
-  for (i = 0; i < Prog_COUNT; ++i)
+  for (i = 0; i < Prog_COUNT+1; ++i)
     if (files[i].watch == -1) {
       files[i].watch = inotify_add_watch(inotifyfd, files[i].filename,
         IN_MODIFY | IN_DELETE_SELF | IN_MOVE_SELF);
@@ -601,7 +622,7 @@ static void monitor_changes() {
       int evt_size = sizeof(struct inotify_event) + e->len;
       struct file_program_t *p = 0;
 
-      for (i = 0; i < Prog_COUNT; ++i)
+      for (i = 0; i < Prog_COUNT+1; ++i)
         if (files[i].watch == e->wd)
           p = files + i;
 
@@ -622,7 +643,7 @@ static void monitor_changes() {
     } // while (events)
   }
 
-  for (i = 0; i < Prog_COUNT; ++i)
+  for (i = 0; i < Prog_COUNT+1; ++i)
     if (files[i].updated != 0) {
       char *src = read_file(files[i].filename);
       files[i].updated = 0;
@@ -681,6 +702,9 @@ int main(int argc, char *argv[]) {
   files[ProgPostprocess].filename = "postprocessor.glsl"/*argv[4]*/;
   files[ProgPostprocess].program_counter = PhaseComplete;
   files[ProgPostprocess].watch = -1;
+  files[Prog_COUNT].filename = "common.glsl"/*argv[4]*/;
+  files[Prog_COUNT].program_counter = PhasePlanBegin;
+  files[Prog_COUNT].watch = -1;
   inotifyfd = inotify_init1(IN_NONBLOCK);
   CHECK(inotifyfd != -1, "inotify_init1");
 

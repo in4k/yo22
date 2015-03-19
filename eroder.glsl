@@ -13,18 +13,17 @@ void main() {
   //gl_FragColor=c;return;
   // 1. tf
   vec4 c0=c;
-  float h=c.w+c.z,dw=0.;
+  float h=c.w+c.z,dw=0.,k=.25;
   vec3 e=vec3(1.,0.,-1.);
-  float kk = .25;
-  dw+=kk*tf(h,c.w,e.xy);
-  dw+=kk*tf(h,c.w,e.yx);
-  dw+=kk*tf(h,c.w,-e.xy);
-  dw+=kk*tf(h,c.w,-e.yx);
-  //kk*=1./sqrt(2.);
-  //dw+=kk*tf(h,c.w,e.xx);
-  //dw+=kk*tf(h,c.w,e.xz);
-  //dw+=kk*tf(h,c.w,e.zx);
-  //dw+=kk*tf(h,c.w,e.zz);
+  dw+=k*tf(h,c.w,e.xy);
+  dw+=k*tf(h,c.w,e.yx);
+  dw+=k*tf(h,c.w,-e.xy);
+  dw+=k*tf(h,c.w,-e.yx);
+  //k*=1./sqrt(2.);
+  //dw+=k*tf(h,c.w,e.xx);
+  //dw+=k*tf(h,c.w,e.xz);
+  //dw+=k*tf(h,c.w,e.zx);
+  //dw+=k*tf(h,c.w,e.zz);
   c.w+=dw;
   // 2. evaporate
   //dw=min(c.w,Ke);

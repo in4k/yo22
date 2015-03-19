@@ -2,24 +2,28 @@ const float EPS = .01, FAR = 5000., SKY = FAR, GS = 32.;
 
 vec3 sundir = normalize(_s);//vec3(.1,.036,.037));
 
-float H(vec2 p){vec4 c=TT(p);return c.z;}
+float maxv(vec3 v){return max(v.x,max(v.y,v.z));}
+float dbox(vec3 p,vec3 sz){
+  return maxv(abs(p)-sz);
+}
 
+
+float H(vec2 p){vec4 c=TT(p);return c.z
+  // grass
+  +.5*n4(p).z*step(.5,n4(p*.17).w)
+  // forests
+  +4.*n4(p*.8).z*step(.6,n4(p*.02).w)
+;}
+float TD(vec3 p,vec3 D) {
+  float h = H(p.xz);
+  return (p.y - h);
+}
 vec3 TN(vec2 p){
   vec2 e=vec2(1.,.0);
   vec3 dx=vec3(2.*e.x,H(p+e.xy)-H(p-e.xy),0.);
   vec3 dz=vec3(0.,H(p+e.yx)-H(p-e.yx),2.*e.x);
   //return normalize(cross(dz,dx));//+1.5*n4(p*134.241));
   return normalize(cross(dz,dx)+3.5*(n4(p*7.31).yxz-vec3(.5)));
-}
-
-float maxv(vec3 v){return max(v.x,max(v.y,v.z));}
-float dbox(vec3 p,vec3 sz){
-  return maxv(abs(p)-sz);
-}
-
-float TD(vec3 p,vec3 D) {
-  float H = H(p.xz);
-  return (p.y - H);
 }
 
 //#define MAKE_BINSEARCH(NAME_,DISTF_,STEPS_,ARG_) \
@@ -81,7 +85,7 @@ float BD(vec3 p, cell_t c) {
   return max(d, dbox(p, c.BB));
 }
 
-vec3 block_normal(vec3 p, cell_t c){
+vec3 BN(vec3 p, cell_t c){
   vec2 e=vec2(.01,.0);
   return normalize(vec3(
     BD(p+e.xyy,c)-BD(p-e.xyy,c),
@@ -100,7 +104,7 @@ struct hit_t {
 
 hit_t BH(hit_t h) {
   h.mid = 2;
-  h.n = block_normal(h.p, h.c);
+  h.n = BN(h.p, h.c);
   return h;
 }
 
@@ -189,7 +193,7 @@ struct mat_t {
 };
 
 vec3 mg(vec2 p) {
-  return vec3(.2,.6,.23)*.3 + .1 * (n4(p*.2).xxx-vec3(.5));
+  return vec3(.2,.6,.23)*.3 + .2 * (n4(p*.2).xxx-vec3(.5));
 }
 
 mat_t M(hit_t h) {
@@ -240,11 +244,121 @@ vec3 ref(hit_t h){
   return normalize(r*sign(dot(r,h.n)));
 }
 
+const float I=10.,g=.76,g2=g*g,R0=6360e3,R1=6420e3;
+const vec3 C=vec3(0.,-R0,0.),Km=vec3(21e-6),Kr=vec3(5.8,13.5,33.1)*1e-6;
+
+float ER(vec3 o, vec3 d, float r) {
+  o -= C;
+  float
+    b = dot(o, d),
+    c = dot(o, o) - r * r,
+    e = b * b - c,
+    p, q;
+  if (e < 0.) return -1.;
+  e = sqrt(e);
+  p = -b - e,
+  q = -b + e;
+  return (p >= 0.) ? p : q;
+}
+
+void SD(vec3 O, out float M, out float R) {
+  float h = length(O - C) - R0;
+  M = 3. * exp(-h / 200.);
+  R = exp(-h / 8000.);
+  //if (cl < h && h < ch) {
+  //  float kh = smoothstep(cl, ch, h);
+  //  float env = 4. * (kh - kh*kh);
+  //  float k = .5, s = .25, v = 0.;
+  //  for (int i = 0; i < 8; ++i, k *= .5, s *= 2.)
+  //  v += k * noise(O * s);
+  //  v -= .55;
+  //  v *= env;
+  //  v += .535;
+  //  //M += v;//235. * v;//smoothstep(.58,.593,v);
+  //}
+}
+
+vec2 integrate_depth(vec3 O, vec3 D, float L) {
+  float depth_m = 0., depth_r = 0.;
+  float base_dx = L / 16.;
+  vec3 p = O;
+  float ll = 0.;
+  for (int i = 0; i < 16; ++i) {
+    float dx = base_dx * (1. + n4(p.xz * 2e3).w);
+    p = O + D * (ll + dx);
+    float Dr, Dm;
+    SD(p, Dm, Dr);
+    depth_m += Dm * dx;
+    depth_r += Dr * dx;
+    ll += base_dx;
+  }
+  return vec2(depth_m, depth_r);
+}
+
+vec3 scatter_length(vec3 O, vec3 D, float L, vec3 color) {
+	float c = max(0., dot(D, sundir));
+  float Ph_r = .0596831 * (1. + c * c);
+  float Ph_m = .1193662 * (1. - g2) * (1. + c * c) / ((2. + g2) * pow(1. + g2 - 2.*g*c, 1.5));
+  float depth_m = 0.;
+  float depth_r = 0.;
+  vec3 I_sun_m = vec3(0.);
+  vec3 I_sun_r = vec3(0.);
+
+  float base_dx = L / 32.;
+  float ll = 0.;
+  vec3 p = O;
+  for (int i = 0; i < 32; ++i) {
+    float dx = base_dx * (1. + n4(p.xz * 2e3).w);
+    p = O + D * (ll + dx);
+    ll += base_dx;
+    float Dr, Dm;
+    SD(p, Dm, Dr);
+    Dm *= dx; Dr *= dx;
+    depth_m += Dm;
+    depth_r += Dr;
+
+    // if shadowed by terrain
+    //float Lt = TT(p, sundir);
+    //if (Lt < Far) continue;
+
+    float sunray_L = ER(p,sundir,R1);
+
+    vec2 dd = vec2(0.);
+    dd = integrate_depth(p, sundir, sunray_L);
+    float sunray_depth_m = dd.x, sunray_depth_r = dd.y;
+
+    vec3 I_sun = exp(-(
+        Km * (sunray_depth_m + depth_m) +
+        Kr * (sunray_depth_r + depth_r)
+      ));
+    I_sun_m += Dm * I_sun;
+    I_sun_r += Dr * I_sun;
+  }
+
+  return I * (
+      Km * Ph_m * I_sun_m +
+      Kr * Ph_r * I_sun_r)
+    + color * exp(-(Km * depth_m + Kr * depth_r));
+}
+
+//vec3 scatter(vec3 O, vec3 D, float L_max, vec3 L_color) {
+//  //float L_low = ER(O, D, R0 + 3000.);
+//  if (L_low < L_max) {
+//    vec3 hi = scatter_length(O + D * L_low, D, L_max - L_low, L_color);
+//    return scatter_length(O, D, L_low, hi);
+//  }
+//  return scatter_length(O, D, L_max, L_color);
+//}
+
 vec3 air(vec3 O, vec3 D) {
   return 30. * vec3(1.) * smoothstep(.999,.9999,dot(D,sundir))
     + pow(
     vec3(128., 218., 235.)/255.
     , vec3(2.2));
+}
+
+vec3 S(vec3 O, vec3 D, float L, vec3 c) {
+  return scatter_length(O, D, L, c);
 }
 
 // DEBUG
@@ -254,8 +368,8 @@ vec3 air(vec3 O, vec3 D) {
 //#define CHECK_ASSERT if(assertcolor_.a!=0.){gl_FragColor=assertcolor_*1e3;return;}
 
 void main(){
-  //vec2 res=vec2(1280.,720.);
-  vec2 res=vec2(1920.,1080.);
+  vec2 res=vec2(1280.,720.);
+  //vec2 res=vec2(1920.,1080.);
   vec2 uv=gl_FragCoord.xy/res-vec2(.5);uv.x*=res.x/res.y;
   vec3 O=_cp,D=normalize(vec3(uv,2.))*_cm;
   //O.y = max(O.y, h2(O.xz)+10.);
@@ -284,10 +398,11 @@ void main(){
 //    color = vec3(1000.,0.,0.);
 //  }
 //#else
-  float Lmax = FAR;
+  float f = FAR;
+  vec3 pO = O;
   for (int i = 0; i < 3; ++i){
     if (dot(ct,ct) < .001) break;
-    hit_t h = RT(O, D, Lmax);
+    hit_t h = RT(O, D, f);
   //CHECK_ASSERT
 
     if (h.mid > 0) {
@@ -296,12 +411,13 @@ void main(){
       O = h.p + h.n * EPS;
       // importance
       if (RT(O, sundir, 100.).l >= 100.) c += brdf(h, m, sundir) * air(O, sundir);
+      color += ct * S(pO, D, h.l, c);
       D = ref(h);
-      color += ct * c;
       ct *= brdf(h, m, D);
-      Lmax *= .6;
+      f *= .6;
     } else {
-      color += ct * air(O, D);
+      color += ct * max(S(O, D, ER(O, D, R1), vec3(0.)),vec3(0.));//air(O, D);
+      //color += ct * air(O, D);
     }
   }
   //color = max(vec3(0.), color);
