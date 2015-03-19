@@ -27,4 +27,11 @@
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="eroder.glsl" />
+    <None Include="generator.glsl" />
+    <None Include="planner.glsl" />
+    <None Include="postprocessor.glsl" />
+    <None Include="tracer.glsl" />
+  </ItemGroup>
 </Project>

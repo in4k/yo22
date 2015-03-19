@@ -97,7 +97,7 @@ static void report_n_abort(const char *file, int line, const char *message) {
 
 #ifdef PLATFORM_WINDOWS
 #define FUNCLIST_DO(T,N) "gl" #N "\0"
-static const char *gl_names =
+static const char gl_names[] =
 FUNCLIST FUNCLIST_DBG
 ;
 #undef FUNCLIST_DO
@@ -185,8 +185,7 @@ enum {
 static const char *fragment_shaders[Prog_COUNT] = {NULL, NULL, NULL, NULL, NULL};
 #endif
 
-static const char *vertex_shader_source[] = {"attribute vec4 v;varying vec2 V;void main(){gl_Position=v;V=v.xy;}"};
-/*static char *common_shader_header = 0;*/
+static const char *vertex_shader_source = "attribute vec4 v;varying vec2 V;void main(){gl_Position=v;V=v.xy;}";
 
 static GLuint textures[Tex_COUNT];
 static struct {
@@ -196,11 +195,10 @@ static GLuint framebuffer;
 static GLuint vertex_shader;
 static GLuint programs[Prog_COUNT];
 static struct {
-  GLint step, progress, progress_erosion, progress_trace, target_res, noise, terrain, plan, frame, sundir, campos, cammat;
+  GLint step, progress, progress_trace, target_res, noise, terrain, plan, frame, sundir, campos, cammat;
 } program_locs[Prog_COUNT];
-static const char *uniform_names[] = {
-  "_t", "_p", "_pe", "_pt", "_r", "_N", "_T", "_P", "_F", "_s", "_cp", "_cm", 0
-};
+static const char uniform_names[] =
+  "_t\0\0_p\0\0_pt\0_r\0\0_N\0\0_T\0\0_P\0\0_F\0\0_s\0\0_cp\0_cm";
 
 static unsigned int noise_buffer[SizeNoise * SizeNoise];
 static unsigned int prng_state = 5323u;
@@ -328,6 +326,18 @@ static void camera_rotate_pitch(float a) {
 static void camera_rotate_yaw(float a) {
   camera_rotate(u_cammat+3, a);
 }
+
+static void yo22_sundir(float x, float y) {
+  //float sx = sinf(x*3.1415926f), sy = sinf(y*3.1415926f);
+  x = x * 3.f - 1.5;
+  y = y * 3.f - 1.5;
+  float z = x*x + y*y;
+  u_sundir[0] = x;
+  u_sundir[2] = y;
+  u_sundir[1] = z < 1. ? sqrtf(1.f - z) : -sqrtf(z - 1.f);
+  fprintf(stderr, "sun %f, %f, %f\n", u_sundir[0], u_sundir[1], u_sundir[2]);
+  if (program_counter > PhasePathtraceBegin) program_counter = PhasePathtraceBegin;
+}
 #endif // TOOL
 
 enum {
@@ -344,7 +354,7 @@ static void use_program(int index) {
   gl.UseProgram(program);
   gl.Uniform1f(program_locs[index].step, u_step);
   gl.Uniform1f(program_locs[index].progress, u_progress);
-  gl.Uniform1f(program_locs[index].progress_erosion, u_progress_erosion);
+  //gl.Uniform1f(program_locs[index].progress_erosion, u_progress_erosion);
   gl.Uniform1f(program_locs[index].progress_trace, u_progress_trace);
   gl.Uniform2f(program_locs[index].target_res, (float)width, (float)height);
   gl.Uniform1i(program_locs[index].noise, SamplerBinding_Noise);
@@ -389,9 +399,8 @@ static GLuint create_and_compile_program(int index) {
   if (fragment_shaders[index] == 0) return 0;
 #endif
 
-  /*const char *sources[] = {common_shader_header, fragment_source};
-  GLuint fragment = create_and_compile_shader(GL_FRAGMENT_SHADER, 2, sources);*/
-  GLuint fragment = create_and_compile_shader(GL_FRAGMENT_SHADER, 1, fragment_shaders + index);
+  const char *sources[2] = {fragment_shaders[Prog_COUNT], fragment_shaders[index]};
+  GLuint fragment = create_and_compile_shader(GL_FRAGMENT_SHADER, 2, sources);
   GLuint program = gl.CreateProgram();
   gl.AttachShader(program, fragment);
   gl.AttachShader(program, vertex_shader);
@@ -412,10 +421,10 @@ static GLuint create_and_compile_program(int index) {
   fprintf(stderr, "Linked\n");
 
 #endif
-    for (i = 0; uniform_names[i] != 0; ++i) {
-    ((GLint*)(program_locs + index))[i] = gl.GetUniformLocation(program, uniform_names[i]);
+    for (i = 0; i < sizeof(uniform_names)/4; ++i) {
+    ((GLint*)(program_locs + index))[i] = gl.GetUniformLocation(program, uniform_names + i*4);
 #ifdef DEBUG
-    fprintf(stderr, "  %s loc = %d  ", uniform_names[i], ((GLint*)(program_locs + index))[i]);
+    fprintf(stderr, "  %s loc = %d  ", uniform_names + i*4, ((GLint*)(program_locs + index))[i]);
 #endif
   }
 #ifdef DEBUG
@@ -433,7 +442,6 @@ static void create_texture(int index, int width, int height, int type, void *dat
     texinfo[index].h = height;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    /*glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);*/
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
@@ -452,26 +460,19 @@ static void yo22_init() {
   create_texture(TexPlan, SizePlan, SizePlan, GL_RGBA32F, NULL);
   create_texture(TexFrame, WIDTH, HEIGHT, GL_RGBA32F, NULL);
 
-  vertex_shader = create_and_compile_shader(GL_VERTEX_SHADER, 1, vertex_shader_source);
+  const char *source = vertex_shader_source;
+  vertex_shader = create_and_compile_shader(GL_VERTEX_SHADER, 1, &source);
   CHECK(vertex_shader != 0, "vertex shader");
-  for (i = 0; i < Prog_COUNT; ++i)
-    create_and_compile_program(i);
+  //for (i = 0; i < Prog_COUNT; ++i)
+    create_and_compile_program(0);
+    create_and_compile_program(1);
+    create_and_compile_program(2);
+    create_and_compile_program(3);
+    create_and_compile_program(4);
 }
 
 static void yo22_size(int w, int h) {
   width = w, height = h;
-}
-
-static void yo22_sundir(float x, float y) {
-  //float sx = sinf(x*3.1415926f), sy = sinf(y*3.1415926f);
-  x = x * 3. - 1.5;
-  y = y * 3. - 1.5;
-  float z = x*x + y*y;
-  u_sundir[0] = x;
-  u_sundir[2] = y;
-  u_sundir[1] = z < 1. ? sqrtf(1.f - z) : -sqrtf(z - 1.f);
-  fprintf(stderr, "sun %f, %f, %f\n", u_sundir[0], u_sundir[1], u_sundir[2]);
-  if (program_counter > PhasePathtraceBegin) program_counter = PhasePathtraceBegin;
 }
 
 static void yo22_paint() {
@@ -934,10 +935,10 @@ void WinMainCRTStartup() {
   SetPixelFormat(dc, ChoosePixelFormat(dc, &pfd), &pfd);
   wglMakeCurrent(dc, wglCreateContext(dc));
 
-  for (; gl_names[0] != 0; ++fn) {
-    *fn = wglGetProcAddress(gl_names);
-     while (gl_names[0] != 0) ++gl_names;
-     ++gl_names;
+  for (; fnn[0] != 0; ++fn) {
+    *fn = wglGetProcAddress(fnn);
+     while (fnn[0] != 0) ++fnn;
+     ++fnn;
   }
 
   yo22_init();
