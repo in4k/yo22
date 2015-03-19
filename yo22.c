@@ -149,8 +149,8 @@ enum {
 };
 
 enum {
-  PhaseTerrainErosion_Iter = 1024,
-  PhasePathtrace_Iter = 64,
+  PhaseTerrainErosion_Iter = 512,
+  PhasePathtrace_Iter = 32,
 
   PhaseGenerate = 0,
   PhaseErodeBegin = PhaseGenerate,
