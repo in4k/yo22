@@ -1,8 +1,8 @@
 const float EPS = .01, FAR = 5000., SKY = FAR, GS = 32.;
 
-float maxv(vec3 v){return max(v.x,max(v.y,v.z));}
-float dbox(vec3 p,vec3 sz){
-  return maxv(abs(p)-sz);
+float Mv(vec3 v){return max(v.x,max(v.y,v.z));}
+float bx(vec3 p,vec3 sz){
+  return Mv(abs(p)-sz);
 }
 
 
@@ -68,24 +68,35 @@ void CI(vec3 p) {
   c.f = 9.+.2*c.S.y;
 }
 
-float bd1(vec3 p) {
-vec2 e=vec2(1.,0.);
+//float bd1(vec3 p) {
+//  vec2 e=vec2(1.,0.);
+//  float d = 1e6;
+//  vec3 s = c.BB * vec3(.4+.3*c.S.z,1.,.4+.3*c.S.y);
+//  for (int i = 0; i < 4; ++i)
+//  {
+//    vec3 pp = p-(c.BB-s)*(2.*vec3(c.S.w,0.,c.S.z)-vec3(1.));
+//    d = min(d, bx(pp, s));
+//    s += vec3(.2+c.S.x, 0., .2+c.S.y) * .2 * c.BB;
+//    s.y *= .7+.1*c.S.z;
+//  }
+//  return d;
+//}
+
+float BD(vec3 p) {
+  p -= c.c; // p is now in cell-space
+  if (c.Bh < 10.) return 1e6;
+  //float d = (c.Bh < 10.) ? 1e6 : bd1(p);
+  vec2 e=vec2(1.,0.);
   float d = 1e6;
   vec3 s = c.BB * vec3(.4+.3*c.S.z,1.,.4+.3*c.S.y);
   for (int i = 0; i < 4; ++i)
   {
     vec3 pp = p-(c.BB-s)*(2.*vec3(c.S.w,0.,c.S.z)-vec3(1.));
-    d = min(d, dbox(pp, s));
+    d = min(d, bx(pp, s));
     s += vec3(.2+c.S.x, 0., .2+c.S.y) * .2 * c.BB;
     s.y *= .7+.1*c.S.z;
   }
-  return d;
-}
-
-float BD(vec3 p) {
-  p -= c.c; // p is now in cell-space
-  float d = (c.Bh < 10.) ? 1e6 : bd1(p);
-  return max(d, dbox(p, c.BB));
+  return max(d, bx(p, c.BB));
 }
 
 vec3 BN(vec3 p){
@@ -153,8 +164,7 @@ float RT(vec3 O, vec3 D, float L) {
   hm = -1;
   hl = 0.;
   hi = D;
-  float dl = 0.;
-  float pl = hl;
+  float dl = 0., pl = hl, de, dx, dy, dz, d;
   for (int i = 0; i < 256; ++i) {
     if (hl > L) break;
     float de = EPS * hl * 2e-2;
@@ -166,13 +176,13 @@ float RT(vec3 O, vec3 D, float L) {
       // TODO skipsize dependent on D.y
       //float dx = xp(hp.x, D.x, c.m.x - GS, hc.m.x + GS);
       //float dz = xp(hp.z, D.z, c.m.z - GS, hc.m.z + GS);
-      float dx = xp(hp.x, D.x, c.m.x, c.m.x + GS);
-      float dz = xp(hp.z, D.z, c.m.z, c.m.z + GS);
+      dx = xp(hp.x, D.x, c.m.x, c.m.x + GS);
+      dz = xp(hp.z, D.z, c.m.z, c.m.z + GS);
       //ASSERT(dz >= 0.,0.,1.,1.)
       //ASSERT(dx >= 0.,0.,.5,1.)
       //ASSERT(hp.z >= cp.y,1.,1.,0.)
       //ASSERT(hp.z <= cp.y+GS,1.,0.,1.)
-      float dy =
+      dy =
         (hp.y > c.B) ?
           xp(hp.y, D.y, c.B, SKY) :
         ((hp.y > c.H) ?// && (P.y-P.w) > 0.) ?
@@ -186,7 +196,7 @@ float RT(vec3 O, vec3 D, float L) {
     } else
     //h_mc -= 1.;}
     {
-      float d = BD(hp);
+      d = BD(hp);
       if (d < de) {BH(); break;}
       if (hp.y < c.H)
       {
@@ -218,7 +228,8 @@ vec3 brdf(vec3 wi) {
 }
 
 vec3 ref(){
-  vec3 r=rand().zyx*2.-vec3(1.);
+  //vec3 r=rand().zyx*2.-vec3(1.);
+  vec3 r = n4(fc+floor(hp.zy*313.)).zyx + n4(floor(hp.zx*171.)-fc).wxy - vec3(1.);
   return normalize(r*sign(dot(r,hn)));
 }
 
@@ -305,16 +316,15 @@ vec3 S(vec3 O, vec3 D, float L, vec3 cc) {
 //#define CHECK_ASSERT if(assertcolor_.a!=0.){gl_FragColor=assertcolor_*1e3;return;}
 
 void main(){
-  vec2 res=vec2(1280.,720.);
+  vec2 res=vec2(1280.,720.),
   //vec2 res=vec2(1920.,1080.);
-  vec2 uv=gl_FragCoord.xy/res-vec2(.5);uv.x*=res.x/res.y;
-  vec3 O=_cp,D=normalize(vec3(uv,2.))*_cm;
+  uv=V;uv.x*=res.x/res.y;
+  vec3 C = vec3(0.), ct = vec3(1.),O=_cp+n4(vec2(_t)*fc).xyz*.3,D=normalize(vec3(uv,2.))*_cm,pO,loc;
   //O.y = max(O.y, h2(O.xz)+10.);
 
   // FIXME replace with lens/sampler model
-  O+=n4(vec2(_t)*gl_FragCoord.xy).xyz*vec3(.3,.3,.3);
+  //O;
 
-  vec3 C = vec3(0.), ct = vec3(1.);
 //#if 0
   //hit_t t = trace_grid(O, D, FAR);
   //CHECK_ASSERT
@@ -336,7 +346,7 @@ void main(){
 //  }
 //#else
   float f = FAR;
-  vec3 pO = O;
+  pO = O;
   for (int i = 0; i < 3; ++i){
     if (dot(ct,ct) < .001) break;
     Ce = Cd = Cs = vec3(0.);
@@ -344,13 +354,13 @@ void main(){
   //CHECK_ASSERT
 
     if (hm > 0) {
-      vec3 loc = Ce;
+      loc = Ce;
       O = hp + hn * EPS;
       // importance
       vec3 cd = Cd, cs = Cs, chi = hi, chn = hn, chp = hp;
       cell_t cc = c;
-      float chl = hl;
-      float shl = RT(O, _s, 100.);
+      float chl = hl,
+      shl = RT(O, _s, 100.);
       Cd = cd; Cs = cs; hn = chn; hp = chp; hi = chi; c = cc; hl = chl;
       if (shl > 100.) loc += brdf(_s) * S(O, _s, ER(O, _s, R1), vec3(I));
       C += ct * S(pO, D, hl, loc);

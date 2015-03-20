@@ -1,3 +1,7 @@
+//#define F f_loat
+//#define V2 v_ec2
+//#define V3 v_ec3
+//#define V4 v_ec4
 uniform float _t,_p,_pt;
 uniform vec2 _r;
 uniform vec3 _s,_cp;
@@ -16,7 +20,7 @@ float fbm(vec2 v,float s) {
   for(int i=0;i<12;++i,k*=.5,s*=2.)r+=k*vn(v*s,vec2(s));
   return r;
 }
-int rs=int(fc.y*1280.+fc.x)+int(n4(vec2(_t,0.)).x*256.+n4(vec2(0.,_t)).z)*256;
-vec4 rand(){rs=int(mod(float(rs+1),1024.*1024.));return n4(vec2(float(rs),floor(float(rs)/1024.)));}
+//int rs=int(fc.y*1280.+fc.x)+int(n4(vec2(_t,0.)).x*256.+n4(vec2(0.,_t)).z)*256;
+//vec4 rand(){rs=int(mod(float(rs+1),1024.*1024.));return n4(vec2(float(rs),floor(float(rs)/1024.)));}
 vec4 TT(vec2 p){return texture2D(_T,(p+vec2(.5))/4096.,-20.);}
 vec4 PP(vec2 p){return texture2D(_P,(floor(p/32.)+vec2(.5))/128.,-20.);}

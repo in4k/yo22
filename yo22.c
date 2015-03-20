@@ -149,7 +149,7 @@ enum {
 };
 
 enum {
-  PhaseTerrainErosion_Iter = 512,
+  PhaseTerrainErosion_Iter = 0,//512,
   PhasePathtrace_Iter = 32,
 
   PhaseGenerate = 0,
@@ -178,6 +178,16 @@ enum {
   ProgPostprocess,
   Prog_COUNT
 };
+
+enum {
+  SamplerBinding_Noise,
+  SamplerBinding_Terrain,
+  SamplerBinding_Plan,
+  SamplerBinding_Frame,
+};
+
+
+#define CMD(OP, A, B) (OP | (A<<3) | (B<<6))
 
 #ifndef TOOL
 #include "shaders.h"
@@ -218,7 +228,7 @@ static void bind_texture(int index, int sampler) {
   glBindTexture(GL_TEXTURE_2D, textures[index]);
 }
 
-static void bind_framebuffer(int target_index) {
+static void bind_framebuffer(int target_index, int _) {
   gl.BindFramebuffer(GL_FRAMEBUFFER, framebuffer);
   gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textures[target_index], 0);
   CHECK(GL_FRAMEBUFFER_COMPLETE == gl.CheckFramebufferStatus(GL_FRAMEBUFFER), "framebuffer is not complete");
@@ -228,19 +238,19 @@ static void bind_framebuffer(int target_index) {
 static float u_step = 0, u_progress, u_progress_erosion, u_progress_trace;
 static float u_sundir[3] = {
   //-0.068894, 0.123868, 0.989904
-  0.439979, 0.278467, 0.853741
+  0.439979f, 0.278467f, 0.853741f
 };
 static float u_campos[3] = {
   //1941.982910, 402.375183, 2946.904297
-  1809.029175, 252.536713, 4026.856445
+  1809.029175f, 252.536713f, 4026.856445f
 };
 static float u_cammat[9] = {
 //  0.965935, 0.041722, 0.255401,
 //  -0.006570, 0.990554, -0.136966,
 //  -0.258703, 0.130622, 0.957084
-  0.920377, 0.047924, 0.388084,
-  -0.006570, 0.994217, -0.107192,
-  -0.390977, 0.096107, 0.915369,
+  0.920377f, 0.047924f, 0.388084f,
+  -0.006570f, 0.994217f, -0.107192f,
+  -0.390977f, 0.096107f, 0.915369f,
 };
 static int width, height;
 
@@ -349,15 +359,8 @@ static void yo22_sundir(float x, float y) {
 }
 #endif // TOOL
 
-enum {
-  SamplerBinding_Noise,
-  SamplerBinding_Terrain,
-  SamplerBinding_Plan,
-  SamplerBinding_Frame,
-};
-
 static GLuint program;
-static void use_program(int index) {
+static void use_program(int index, int _) {
   u_step += 1;
   program = programs[index];
   gl.UseProgram(program);
@@ -375,7 +378,7 @@ static void use_program(int index) {
   gl.UniformMatrix3fv(program_locs[index].cammat, 1, GL_FALSE, u_cammat);
 }
 
-static void compute() {
+static void compute(int a, int b) {
   glRects(-1, -1, 1, 1);
 }
 
@@ -456,7 +459,8 @@ static GLuint create_and_compile_program(int index) {
   return program;
 }
 
-static void create_texture(int index, int width, int height, int type, void *data) {
+static void create_texture(int index, int width, int height, int type, void *data)
+{
     glBindTexture(GL_TEXTURE_2D, textures[index]);
     glTexImage2D(GL_TEXTURE_2D, 0, type, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     texinfo[index].w = width;
@@ -473,8 +477,9 @@ static void yo22_init() {
   for (i = 0; i < SizeNoise * SizeNoise; ++i)
     noise_buffer[i] = prng();
 
-  glGenTextures(Tex_COUNT, textures);
   gl.GenFramebuffers(1, &framebuffer);
+  glGenTextures(Tex_COUNT, textures);
+
   create_texture(TexNoise8U, SizeNoise, SizeNoise, GL_RGBA, noise_buffer);
   create_texture(TexTerrain0, SizeTerrain, SizeTerrain, GL_RGBA32F, NULL);
   create_texture(TexTerrain1, SizeTerrain, SizeTerrain, GL_RGBA32F, NULL);
@@ -484,9 +489,9 @@ static void yo22_init() {
   const char *source = vertex_shader_source;
   vertex_shader = create_and_compile_shader(GL_VERTEX_SHADER, 1, &source);
   CHECK(vertex_shader != 0, "vertex shader");
-  //for (i = 0; i < Prog_COUNT; ++i)
+  //for (i = 0; i < Prog_COUNT; ++i) create_and_compile_program(i);
     create_and_compile_program(0);
-    create_and_compile_program(1);
+    //create_and_compile_program(1);
     create_and_compile_program(2);
     create_and_compile_program(3);
     create_and_compile_program(4);
@@ -496,57 +501,123 @@ static void yo22_size(int w, int h) {
   width = w, height = h;
 }
 
+static void clear(int a, int b) {
+  glClearColor(0, 0, 0, 0);
+  glClear(GL_COLOR_BUFFER_BIT);
+}
+
+static void blend_compute(int a, int b) {
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+  compute(0, 0);
+  glDisable(GL_BLEND);
+}
+
+static void (*functbl[])(int p1, int p2) = {
+  bind_texture, // 0
+  bind_framebuffer, // 1
+  use_program, // 2
+  compute, // 3 
+  blend_compute, // 4
+  clear // 5
+};
+
+static void call(int cmd) {
+    int op = cmd & 0x07;
+    int a = (cmd >> 3) & 0x07;
+    int b = (cmd >> 6);
+    functbl[op](a, b);
+}
+
+static unsigned char prg[] = {
+/*0*/
+CMD(0, TexNoise8U, SamplerBinding_Noise),
+CMD(0, TexTerrain0, SamplerBinding_Terrain),
+CMD(0, TexPlan, SamplerBinding_Plan),
+CMD(0, TexFrame, SamplerBinding_Frame),
+
+/*4*/
+CMD(1, TexFrame, 0),
+CMD(5, 0, 0),
+CMD(1, TexTerrain0, 0),
+CMD(2, ProgTerrainGenerate, 0),
+CMD(3, 0, 0),
+
+/*9*/
+/*CMD(1, TexTerrain1, 0),
+CMD(2, ProgTerrainErode, 0),
+CMD(0, TexTerrain0, SamplerBinding_Terrain),
+CMD(3, 0, 0),
+CMD(1, TexTerrain0, 0),
+CMD(2, ProgTerrainErode, 0),
+CMD(0, TexTerrain1, SamplerBinding_Terrain),
+CMD(3, 0, 0),*/
+
+/*17*/
+CMD(1, TexPlan, 0),
+CMD(2, ProgTerrainPlan, 0),
+CMD(3, 0, 0),
+
+/*20*/
+CMD(1, TexFrame, 0),
+CMD(2, ProgTrace, 0),
+CMD(4, 0, 0),
+
+/*23*/
+CMD(2, ProgPostprocess, 0),
+CMD(3, 0, 0)
+
+/*25*/
+};
+
+static void run_prg(int a, int n) {
+  int i;
+  for(i = 0; i < n; ++i)
+    call(prg[a+i]);
+}
+
+/*
+static unsigned char prg[];
+static const int nprg = sizeof(prg);
+
+static void yo22_paint_r() {
+  int left = nprg - program_counter;
+  if (left > 0) {
+    int n = left > 8 ? 8 : left;
+    run_prg(prg + program_counter, n);
+    program_counter += n;
+  }
+  
+  u_progress = (float)nprg / PhaseComplete;
+  gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+  glViewport(0, 0, width, height);
+  call(CMD(2, ProgPostprocess, 0));
+  call(CMD(3, 0, 0));
+}
+*/
+
 static void yo22_paint() {
   u_progress = (float)program_counter / PhaseComplete;
-  u_progress_erosion = (float)(program_counter - PhaseErodeBegin) / PhaseTerrainErosion_Iter;
-  u_progress_trace = (float)(program_counter - PhasePathtraceBegin) / PhasePathtrace_Iter;
 
-  bind_texture(TexNoise8U, SamplerBinding_Noise);
-  bind_texture(TexTerrain0, SamplerBinding_Terrain);
-  bind_texture(TexPlan, SamplerBinding_Plan);
-  bind_texture(TexFrame, SamplerBinding_Frame);
+  //run_prg(0, 4);
+  
+  if (program_counter < PhaseGenerate+1)
+    run_prg(0, 9);
 
-  if (program_counter == PhaseGenerate) {
-    bind_framebuffer(TexTerrain0);
-    use_program(ProgTerrainGenerate);
-    compute();
-  }
-
-  if (program_counter < PhaseErodeEnd) {
-    int j;for(j=0;j<2;++j){
-      bind_framebuffer(TexTerrain1);
-      use_program(ProgTerrainErode);
-      bind_texture(TexTerrain0, SamplerBinding_Terrain);
-      compute();
-      bind_framebuffer(TexTerrain0);
-      bind_texture(TexTerrain1, SamplerBinding_Terrain);
-      compute();
-    }
-  } else if (program_counter < PhasePlanEnd) {
-    bind_framebuffer(TexPlan);
-    use_program(ProgTerrainPlan);
-    compute();
+  //if (program_counter < PhaseErodeEnd) {//run_prg(9, 8); } else 
+  if (program_counter < PhasePlanEnd) {
+    run_prg(17-8, 3);
   } else if (program_counter < PhasePathtraceEnd) {
-    bind_framebuffer(TexFrame);
-    if (program_counter == PhasePathtraceBegin) {
-      glClearColor(0,0,0,0);
-      glClear(GL_COLOR_BUFFER_BIT);
-    }
-    use_program(ProgTrace);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-    compute();
-    glDisable(GL_BLEND);
+    run_prg(20-8, 3);
   }
 
   gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
   glViewport(0, 0, width, height);
-  use_program(ProgPostprocess);
-  compute();
+  run_prg(23-8, 2);
 
   ++program_counter;
   if (program_counter >= PhaseComplete) program_counter = PhaseComplete;
-/*  else fprintf(stderr, "%d%c", program_counter, program_counter%16==15 ? '\n' : ' ');*/
+//  else fprintf(stderr, "%d%c", program_counter, program_counter%16==15 ? '\n' : ' ');
 }
 
 #ifdef PLATFORM_POSIX
